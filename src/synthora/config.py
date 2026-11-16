@@ -16,3 +16,4 @@ class Settings(BaseSettings):
     telegram_token: SecretStr
     llm_api_key: SecretStr
     google_api_key: SecretStr
+    owner_telegram_id: int
