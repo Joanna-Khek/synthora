@@ -5,9 +5,15 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "httpx>=0.28.1",
+    "loguru>=0.8.0",
     "pydantic-settings>=2.16.3",
+    "python-telegram-bot>=22.8",
     "trafilatura>=2.3.1",
 ]
+
+[project.scripts]
+synthora-bot = "synthora.server.bot.app:main"
 
 [build-system]
 requires = ["uv_build>=0.12.9,<0.13.0"]
@@ -18,3 +24,4 @@ dev = [
     "ipykernel>=7.4.0",
     "pytest>=9.2.0",
 ]
+
