@@ -17,3 +17,6 @@ class Settings(BaseSettings):
     llm_api_key: SecretStr
     google_api_key: SecretStr
     owner_telegram_id: int
+    github_token: SecretStr | None = (
+        None  # without token is 60req/hr. with token is 5000req/hr
+    )
