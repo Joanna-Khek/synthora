@@ -1,0 +1,39 @@
+import httpx
+
+USER_AGENT = "Mozilla/5.0 (compatible; synthora/0.1)"
+MAX_HTML_BYTES = 5_000_000  # refuse pages bigger than 5 MB
+
+
+class ExtractionError(Exception):
+    """An extractor could not produce usable text. The message says why."""
+
+
+def make_client() -> httpx.AsyncClient:
+    return httpx.AsyncClient(
+        headers={"User-Agent": USER_AGENT},
+        follow_redirects=True,
+        timeout=20,
+    )
+
+
+async def fetch_html(client: httpx.AsyncClient, url: str) -> tuple[str, str]:
+    """Download a web apge. Returns (final_url, html)"""
+    try:
+        resp = await client.get(url)
+    except httpx.HTTPError as e:
+        raise ExtractionError(f"Could not fetch {url}: {type(e).__name__}") from e
+
+    # Check for status 200
+    if resp.status_code != 200:
+        raise ExtractionError(f"{url} answered HTTP {resp.status_code}")
+
+    # Check response is HTML
+    content_type = resp.headers.get("content-type", "")
+    if "html" not in content_type:
+        raise ExtractionError(f"{url} is not a web page ({content_type or 'no type'})")
+
+    # Check response is not large
+    if len(resp.content) > MAX_HTML_BYTES:
+        raise ExtractionError(f"{url} is larger than {MAX_HTML_BYTES} bytes")
+
+    return str(resp.url), resp.text
