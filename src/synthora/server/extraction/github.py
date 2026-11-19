@@ -4,7 +4,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from synthora.schemas import ExtractedSource
+from synthora.server.schemas import ExtractedSource
 from synthora.server.extraction.fetch import ExtractionError
 
 API = "https://api.github.com"
