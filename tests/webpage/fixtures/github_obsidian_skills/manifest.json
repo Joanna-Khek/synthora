@@ -1,0 +1,35 @@
+[
+  {
+    "method": "GET",
+    "url": "https://api.github.com/repos/obsidianmd/obsidian-skills",
+    "status": 200,
+    "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "x-ratelimit-remaining": "4994",
+      "x-ratelimit-reset": "1794983149"
+    },
+    "body": "0.json"
+  },
+  {
+    "method": "GET",
+    "url": "https://api.github.com/repos/obsidianmd/obsidian-skills/readme",
+    "status": 200,
+    "headers": {
+      "content-type": "application/vnd.github.raw+json; charset=utf-8",
+      "x-ratelimit-remaining": "4993",
+      "x-ratelimit-reset": "1794983149"
+    },
+    "body": "1.json"
+  },
+  {
+    "method": "GET",
+    "url": "https://api.github.com/repos/obsidianmd/obsidian-skills/git/trees/main?recursive=1",
+    "status": 200,
+    "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "x-ratelimit-remaining": "4992",
+      "x-ratelimit-reset": "1794983149"
+    },
+    "body": "2.json"
+  }
+]

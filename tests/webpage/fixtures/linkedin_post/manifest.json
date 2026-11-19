@@ -1,0 +1,20 @@
+[
+  {
+    "method": "GET",
+    "url": "https://lnkd.in/p/g2X4FX6S",
+    "status": 301,
+    "headers": {
+      "location": "https://www.linkedin.com/posts/stasbel_best-12-github-repos-to-secure-your-ai-generated-share-7527015621663035392-npoh/"
+    },
+    "body": "0.txt"
+  },
+  {
+    "method": "GET",
+    "url": "https://www.linkedin.com/posts/stasbel_best-12-github-repos-to-secure-your-ai-generated-share-7527015621663035392-npoh/",
+    "status": 200,
+    "headers": {
+      "content-type": "text/html; charset=utf-8"
+    },
+    "body": "1.html"
+  }
+]

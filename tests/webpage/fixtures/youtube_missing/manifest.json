@@ -1,0 +1,11 @@
+[
+  {
+    "method": "GET",
+    "url": "https://www.googleapis.com/youtube/v3/videos?part=snippet&id=AAAAAAAAAAA",
+    "status": 200,
+    "headers": {
+      "content-type": "application/json; charset=UTF-8"
+    },
+    "body": "0.json"
+  }
+]

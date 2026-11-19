@@ -1,0 +1,31 @@
+[
+  {
+    "method": "GET",
+    "url": "https://www.deeplearning.ai/short-courses/agent-skills-with-anthropic/",
+    "status": 308,
+    "headers": {
+      "content-type": "text/plain",
+      "location": "/short-courses/agent-skills-with-anthropic"
+    },
+    "body": "0.txt"
+  },
+  {
+    "method": "GET",
+    "url": "https://www.deeplearning.ai/short-courses/agent-skills-with-anthropic",
+    "status": 308,
+    "headers": {
+      "content-type": "text/plain",
+      "location": "/courses/agent-skills-with-anthropic"
+    },
+    "body": "1.txt"
+  },
+  {
+    "method": "GET",
+    "url": "https://www.deeplearning.ai/courses/agent-skills-with-anthropic",
+    "status": 200,
+    "headers": {
+      "content-type": "text/html; charset=utf-8"
+    },
+    "body": "2.html"
+  }
+]
