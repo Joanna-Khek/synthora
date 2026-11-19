@@ -11,16 +11,20 @@ from telegram.ext import (
     TypeHandler,
     filters,
 )
-from synthora.config import Settings
-from synthora.server.bot import parsing, source_type
-from synthora.schemas import Capture
-from synthora.server.extraction import ExtractionError, make_client
-from synthora.server.reader import read_url
+from langchain_anthropic import ChatAnthropic
+
+from synthora.server.bot import parsing, source_type, progress
+from synthora.server.schemas import Capture
+from synthora.agent.graph import build_capture_graph
+from synthora.agent.link_picker import make_picker_model
+from synthora.agent.tools import Tools
+from synthora.config import BotConfig, LLMConfig, Settings
+from synthora.server.distiller import make_distill_model
+from synthora.server.reader import ExtractionConnection
 
 
-ALBUM_WAIT_SECONDS = 1.5
-PREVIEW_CHARS = 10000
 TELEGRAM_MAX_CHARS = 4096
+
 # Markdown links: [label](url) and images ![alt](url). The url may contain one level of (...).
 MARKDOWN_LINK = re.compile(r"(!?)\[([^\]]*)\]\(((?:[^()\s]|\([^()]*\))*)\)")
 
@@ -76,68 +80,59 @@ async def on_capture(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 async def flush_album(
     ack: Message, group_id: str, albums: dict, bot_data: dict
 ) -> None:
-    await asyncio.sleep(ALBUM_WAIT_SECONDS)
+    await asyncio.sleep(bot_data["config"].album_wait_seconds)
     parts = albums.pop(group_id)
     logger.info(f"album {group_id}: {len(parts)} parts")
     await process(ack, parsing.to_captures(parts), bot_data)
 
 
-# async def process(ack: Message, captures: list[Capture]) -> None:
-#     await asyncio.sleep(FAKE_PROCESSING_SECONDS)
-#     await ack.edit_text(
-#         format_captures(captures),
-#         link_preview_options=LinkPreviewOptions(is_disabled=True),
-#     )
+SEPARATOR = "\n\n———\n\n"
 
 
 async def process(ack: Message, captures: list[Capture], bot_data: dict) -> None:
-    # Read every Capture at the same time; one crash doesn't stop the others.
-    results = await asyncio.gather(
-        *(read_one(c, bot_data) for c in captures), return_exceptions=True
-    )
-    sections = []
-    for capture, result in zip(captures, results):
-        if isinstance(result, Exception):
-            logger.opt(exception=result).error(f"bug while reading {capture.value}")
-            sections.append(
-                f"💥 bug while reading {capture.value[:80]}: {type(result).__name__}"
+    """Run every Capture at the same time, showing live progress in one message."""
+    live = progress.LiveMessage(ack)
+    sections = ["⏳ waiting…"] * len(captures)
+
+    async def run_one(i: int, capture: Capture) -> None:
+        async def on_progress(text: str) -> None:
+            sections[i] = f"{capture.value[:60]}\n{text}"
+            await live.show(SEPARATOR.join(sections))
+
+        try:
+            sections[i] = await run_capture(capture, bot_data, on_progress)
+        except Exception as e:  # a bug: report it, don't let it hide the other captures
+            logger.opt(exception=e).error(f"bug while processing {capture.value}")
+            sections[i] = (
+                f"💥 bug while processing {capture.value[:80]}: {type(e).__name__}"
             )
-        else:
-            sections.append(result)
-    await ack.edit_text(
-        "\n\n———\n\n".join(sections)[:TELEGRAM_MAX_CHARS],
-        link_preview_options=LinkPreviewOptions(is_disabled=True),
-    )
+
+    await asyncio.gather(*(run_one(i, c) for i, c in enumerate(captures)))
+    await live.show(SEPARATOR.join(sections), final=True)
 
 
-async def read_one(capture: Capture, bot_data: dict) -> str:
-    """Read one Capture and describe the outcome as a short chat message."""
-    kind = source_type.hint_for(capture)
-    if capture.kind == "image":
-        return f"{kind}\nDetected image."
-
-    try:
-        result = await read_url(
-            bot_data["http"],
-            capture.value,
-            kind,
-            youtube_key=bot_data["youtube_key"],
-            github_token=bot_data["github_token"],
-        )
-    except ExtractionError as e:
-        logger.info(f"failed {capture.value}: {e}")
-        return f"📂 {kind}\n❌ {str(e)[:300]}"
-
-    title = " ".join((result.title or "(no title)").split())[:120]
-    preview = " ".join(strip_markdown_links(result.text).split())[:PREVIEW_CHARS]
-
-    return (
-        f"{kind} → {result.tool}\n\n"
-        f"✅ {title}\n"
-        f"by {result.author or '?'} · {kind} via {result.tool} · {len(result.text)} chars\n"
-        f"{result.url}\n\n"
-        f"{preview}…"
-    )
+async def run_capture(capture: Capture, bot_data: dict, on_progress) -> str:
+    """Run one Capture through the graph, reporting each step; return the reply text."""
+    lines: list[str] = []
+    counter = ""
+    reply_text = ""
+    async for mode, chunk in bot_data["graph"].astream(
+        {"capture": capture},
+        context=bot_data["tools"],
+        stream_mode=["updates", "custom"],
+    ):
+        if mode == "updates":
+            for node, update in chunk.items():
+                update = update or {}
+                reply_text = update.get("reply_text", reply_text)
+                line = progress.describe_update(node, update)
+                if line:
+                    lines.append(line)
+                    counter = ""  # a step finished, so its counter is no longer needed
+        else:  # "custom": a counter from read_linked or distill
+            counter = f"⏳ {chunk['step']}: {chunk['done']}/{chunk['total']}"
+        await on_progress("\n".join(lines + [counter or "⏳ working…"]))
+    return reply_text
 
 
 def format_captures(captures: list[Capture]) -> str:
@@ -174,29 +169,44 @@ def make_owner_gate(owner_id: int):
     return owner_gate
 
 
-async def open_http_client(app: Application) -> None:
-    app.bot_data["http"] = make_client()  # one shared client for the whole bot
+async def start_extraction_server(app: Application) -> None:
+    connection = ExtractionConnection()
+    await connection.start()  # launches the Extraction Server as a child process
+    app.bot_data["extraction"] = connection
+
+    # The client only exists after start(), so the Tools are built here.
+    api_key: str = app.bot_data["llm_api_key"]
+    llm: LLMConfig = app.bot_data["llm"]
+    picker_chat = ChatAnthropic(model=llm.model, api_key=api_key, max_tokens=1024)  # pyright: ignore[reportCallIssue]
+    app.bot_data["tools"] = Tools(
+        client=connection.client,
+        distill_model=make_distill_model(api_key, llm),
+        picker_model=make_picker_model(picker_chat),
+    )
+    app.bot_data["graph"] = build_capture_graph()
 
 
-async def close_http_client(app: Application) -> None:
-    await app.bot_data["http"].aclose()
+async def stop_extraction_server(app: Application) -> None:
+    await app.bot_data["extraction"].stop()
 
 
 def build_app(
     token: str,
     owner_id: int,
-    youtube_key: str = "",
-    github_token: str | None = None,
+    bot: BotConfig,
+    llm_api_key: str,
+    llm: LLMConfig,
 ) -> Application:
     app = (
         Application.builder()
         .token(token)
-        .post_init(open_http_client)  # runs once, after the bot starts
-        .post_shutdown(close_http_client)  # runs once, when you press Ctrl+C
+        .post_init(start_extraction_server)  # runs once, after the bot starts
+        .post_shutdown(stop_extraction_server)  # runs once, when you press Ctrl+C
         .build()
     )
-    app.bot_data["youtube_key"] = youtube_key
-    app.bot_data["github_token"] = github_token
+    app.bot_data["config"] = bot
+    app.bot_data["llm_api_key"] = llm_api_key
+    app.bot_data["llm"] = llm
     app.add_handler(
         TypeHandler(Update, make_owner_gate(owner_id)), group=-1
     )  # runs first
@@ -207,15 +217,15 @@ def build_app(
     return app
 
 
+# Bot don't handle the youtube key or github token. Only the extraction server processs reads them.
 def main() -> None:
     settings = Settings()
     app = build_app(
         token=settings.telegram_token.get_secret_value(),
         owner_id=settings.owner_telegram_id,
-        youtube_key=settings.google_api_key.get_secret_value(),
-        github_token=(
-            settings.github_token.get_secret_value() if settings.github_token else None
-        ),
+        bot=settings.bot,
+        llm_api_key=settings.llm_api_key.get_secret_value(),
+        llm=settings.llm,
     )
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
