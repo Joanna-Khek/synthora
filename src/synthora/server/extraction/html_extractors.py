@@ -3,7 +3,7 @@ import httpx
 import json
 import trafilatura
 
-from synthora.schemas import ExtractedSource
+from synthora.server.schemas import ExtractedSource
 from synthora.server.extraction.fetch import ExtractionError, fetch_html
 from synthora.server.extraction.metadata_parser import _MetaTagParser
 from synthora.config import ROOT
