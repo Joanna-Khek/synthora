@@ -1,5 +1,5 @@
 from telegram import Message, MessageEntity
-from synthora.schemas import Capture, ParsedMessage
+from synthora.server.schemas import Capture, ParsedMessage
 
 URL_ENTITY_TYPES = [MessageEntity.URL, MessageEntity.TEXT_LINK]
 
