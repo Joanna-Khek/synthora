@@ -1,4 +1,5 @@
 import httpx
+from synthora.server.extraction.ssrf import BlockedURLError, check_url
 
 USER_AGENT = "Mozilla/5.0 (compatible; synthora/0.1)"
 MAX_HTML_BYTES = 5_000_000  # refuse pages bigger than 5 MB
@@ -8,11 +9,26 @@ class ExtractionError(Exception):
     """An extractor could not produce usable text. The message says why."""
 
 
-def make_client() -> httpx.AsyncClient:
+async def _ssrf_guard(request: httpx.Request) -> None:
+    """Runs before EVERY request the client sends, including each redirect hop."""
+    try:
+        await check_url(str(request.url))
+    except BlockedURLError as e:
+        raise ExtractionError(str(e)) from e
+
+
+def make_client(
+    timeout_seconds: float, transport: httpx.AsyncBaseTransport | None = None
+) -> httpx.AsyncClient:
+    """The one HTTP client for all fetching. `transport` lets tests fake the web."""
     return httpx.AsyncClient(
         headers={"User-Agent": USER_AGENT},
         follow_redirects=True,
-        timeout=20,
+        timeout=timeout_seconds,
+        transport=transport,
+        event_hooks={
+            "request": [_ssrf_guard]
+        },  # calls ssrf guard before sending each request
     )
 
 
