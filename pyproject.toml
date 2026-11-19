@@ -12,9 +12,13 @@ dev = [
 [project]
 dependencies = [
   "httpx>=0.28.1",
+  "langchain-anthropic>=1.7.10",
+  "langgraph>=1.2.22",
   "loguru>=0.8.0",
+  "mcp[cli]>=2.3.0",
   "pydantic-settings>=2.16.3",
   "python-telegram-bot>=22.8",
+  "pyyaml>=6.0.3",
   "trafilatura>=2.3.1"
 ]
 description = "Add your description here"
