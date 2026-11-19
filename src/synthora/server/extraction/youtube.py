@@ -2,7 +2,7 @@ from urllib.parse import parse_qs, urlsplit
 
 import httpx
 
-from synthora.schemas import ExtractedSource
+from synthora.server.schemas import ExtractedSource
 from synthora.server.extraction.fetch import ExtractionError
 
 VIDEOS_ENDPOINT = "https://www.googleapis.com/youtube/v3/videos"
