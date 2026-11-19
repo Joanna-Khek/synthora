@@ -1,5 +1,5 @@
 from urllib.parse import urlsplit
-from synthora.schemas import Capture, SourceType
+from synthora.server.schemas import Capture, SourceType
 
 
 def _host_and_path(url: str) -> tuple[str, list[str]]:
