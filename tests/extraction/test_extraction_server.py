@@ -66,6 +66,7 @@ def test_lists_all_extractors(fake_deps):
         "read_og_meta",
         "read_github_repo",
         "read_youtube_metadata",
+        "resolve_link",
     }
 
 
