@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from langchain_core.runnables import Runnable
 from mcp.client import Client
 
+from synthora import tracing
 from synthora.agent import link_picker
 from synthora.agent.links import PostLink
 from synthora.server import distiller, reader
@@ -38,10 +39,14 @@ class Tools:
     async def resolve(self, url: str) -> str:
         return await reader.resolve_url(self.client, url)
 
+    @mlflow.trace(span_type="CHAIN")
     async def distill(self, source: ExtractedSource) -> Distillation:
+        tracing.link_prompt("distill")  # name must match filename in /prompts
         return await distiller.distill(self.distill_model, source)
 
+    @mlflow.trace(span_type="CHAIN")
     async def pick_links(
         self, post: ExtractedSource
     ) -> tuple[list[PostLink], list[int]]:
+        tracing.link_prompt("picker")  # name must match filename in /prompts
         return await link_picker.pick_links(self.picker_model, post)
