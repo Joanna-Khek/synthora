@@ -1,6 +1,5 @@
 import asyncio
 
-from langchain_anthropic import ChatAnthropic
 from loguru import logger
 from telegram import LinkPreviewOptions, Message, Update
 from telegram.ext import (
@@ -15,19 +14,9 @@ from telegram.ext import (
 
 from synthora import store
 from synthora.bot import parsing, progress, replies, status
-from synthora.capture.distiller import make_distill_model
-from synthora.capture.link_picker import make_picker_model
-from synthora.capture.pipeline import CapturePipeline, MessageIds, ProgressEvent
-from synthora.capture.reader import ExtractionClient
-from synthora.capture.tools import LiveTools
-from synthora.config import (
-    ROOT,
-    BotConfig,
-    CaptureConfig,
-    LLMConfig,
-    Settings,
-    StorageConfig,
-)
+from synthora.bot.deps import DEPS_KEY, BotDeps, close_deps, get_deps, open_deps
+from synthora.capture.pipeline import MessageIds, ProgressEvent
+from synthora.config import BotConfig, CaptureConfig, LLMConfig, Settings, StorageConfig
 from synthora.domain import Capture
 from synthora.tracing import setup_tracing
 
@@ -40,6 +29,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def on_capture(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = update.message
+    deps = get_deps(context)
     replied_to = message.reply_to_message
     if (
         replied_to
@@ -47,12 +37,10 @@ async def on_capture(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         and replied_to.from_user.id == context.bot.id
     ):
         failed = store.find_failed_by_reply(
-            context.bot_data["db"], message.chat_id, replied_to.message_id
+            deps.db, message.chat_id, replied_to.message_id
         )
         if failed:
-            context.application.create_task(
-                complete_from_reply(message, failed, context.bot_data)
-            )
+            context.application.create_task(complete_from_reply(message, failed, deps))
             return
     parsed = parsing.parse_message(message)
     logger.info(f"parsed: {parsed}")
@@ -66,39 +54,32 @@ async def on_capture(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             )
             return
         ack = await message.reply_text("Processing...", do_quote=True)
-        # await process(ack, captures)
         # Run in the background so the next message isn't stuck behind this one.
-        context.application.create_task(process(ack, captures, context.bot_data))
+        context.application.create_task(process(ack, captures, deps))
         return
 
     # If its an image
-    albums: dict[str, list] = context.bot_data.setdefault("albums", {})
-    parts = albums.setdefault(parsed.media_group_id, [])
+    parts = deps.albums.setdefault(parsed.media_group_id, [])
     parts.append(parsed)
     if len(parts) == 1:  # first photo: start timer
         ack = await message.reply_text("Processing...", do_quote=True)
-        context.application.create_task(
-            flush_album(ack, parsed.media_group_id, albums, context.bot_data)
-        )
+        context.application.create_task(flush_album(ack, parsed.media_group_id, deps))
 
 
-async def flush_album(
-    ack: Message, group_id: str, albums: dict, bot_data: dict
-) -> None:
-    await asyncio.sleep(bot_data["config"].album_wait_seconds)
-    parts = albums.pop(group_id)
+async def flush_album(ack: Message, group_id: str, deps: BotDeps) -> None:
+    await asyncio.sleep(deps.config.album_wait_seconds)
+    parts = deps.albums.pop(group_id)
     logger.info(f"album {group_id}: {len(parts)} parts")
-    await process(ack, parsing.to_captures(parts), bot_data)
+    await process(ack, parsing.to_captures(parts), deps)
 
 
 SEPARATOR = "\n\n———\n\n"
 
 
-async def process(ack: Message, captures: list[Capture], bot_data: dict) -> None:
+async def process(ack: Message, captures: list[Capture], deps: BotDeps) -> None:
     """Run every Capture at the same time, showing live progress in one message."""
     live = progress.LiveMessage(ack)
     sections = ["⏳ waiting…"] * len(captures)
-    pipeline: CapturePipeline = bot_data["pipeline"]
     ids = MessageIds(
         chat_id=ack.chat_id,
         user_message_id=ack.reply_to_message.message_id,
@@ -114,7 +95,7 @@ async def process(ack: Message, captures: list[Capture], bot_data: dict) -> None
             await live.show(SEPARATOR.join(sections))
 
         try:
-            outcome = await pipeline.run(capture, ids, on_progress)
+            outcome = await deps.pipeline.run(capture, ids, on_progress)
             sections[i] = replies.render(outcome)
         except Exception as e:  # a bug: report it, don't let it hide the other captures
             logger.opt(exception=e).error(f"bug while processing {capture.value}")
@@ -126,7 +107,7 @@ async def process(ack: Message, captures: list[Capture], bot_data: dict) -> None
     await live.show(SEPARATOR.join(sections), final=True)
 
 
-async def complete_from_reply(message: Message, failed: list, bot_data: dict) -> None:
+async def complete_from_reply(message: Message, failed: list, deps: BotDeps) -> None:
     """FR-22: use the user's pasted text to complete a Failed Capture."""
     if len(failed) > 1:
         await message.reply_text(
@@ -142,7 +123,7 @@ async def complete_from_reply(message: Message, failed: list, bot_data: dict) ->
         return
 
     ack = await message.reply_text("Distilling your text…", do_quote=True)
-    outcome = await bot_data["pipeline"].complete(failed[0], message.text)
+    outcome = await deps.pipeline.complete(failed[0], message.text)
     await ack.edit_text(replies.render_completed(outcome))
 
 
@@ -156,37 +137,11 @@ def make_owner_gate(owner_id: int):
     return owner_gate
 
 
-async def start_extraction_server(app: Application) -> None:
-    extraction = ExtractionClient()
-    path = ROOT / app.bot_data["storage"].db_path
-    path.parent.mkdir(parents=True, exist_ok=True)
-
-    await extraction.start()  # launches the Extraction Server as a child process
-    app.bot_data["extraction"] = extraction
-
-    api_key: str = app.bot_data["llm_api_key"]
-    llm: LLMConfig = app.bot_data["llm"]
-    picker_chat = ChatAnthropic(model=llm.model, api_key=api_key, max_tokens=1024)  # pyright: ignore[reportCallIssue]
-    tools = LiveTools(
-        extraction=extraction,
-        distill_model=make_distill_model(api_key, llm),
-        picker_model=make_picker_model(picker_chat),
-        limits=app.bot_data["capture"],
-    )
-    app.bot_data["db"] = store.connect(path)
-    app.bot_data["pipeline"] = CapturePipeline(app.bot_data["db"], tools)
-
-
 async def show_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
-        status.build_status(context.bot_data["db"]),
+        status.build_status(get_deps(context).db),
         link_preview_options=LinkPreviewOptions(is_disabled=True),
     )
-
-
-async def stop_extraction_server(app: Application) -> None:
-    await app.bot_data["extraction"].stop()
-    app.bot_data["db"].close()
 
 
 def build_app(
@@ -198,18 +153,21 @@ def build_app(
     storage: StorageConfig,
     capture: CaptureConfig,
 ) -> Application:
+    async def post_init(app: Application) -> None:  # runs once, after the bot starts
+        app.bot_data[DEPS_KEY] = await open_deps(
+            bot, llm_api_key, llm, storage, capture
+        )
+
+    async def post_shutdown(app: Application) -> None:  # runs once, on Ctrl+C
+        await close_deps(app.bot_data[DEPS_KEY])
+
     app = (
         Application.builder()
         .token(token)
-        .post_init(start_extraction_server)  # runs once, after the bot starts
-        .post_shutdown(stop_extraction_server)  # runs once, when you press Ctrl+C
+        .post_init(post_init)
+        .post_shutdown(post_shutdown)
         .build()
     )
-    app.bot_data["config"] = bot
-    app.bot_data["llm_api_key"] = llm_api_key
-    app.bot_data["llm"] = llm
-    app.bot_data["storage"] = storage
-    app.bot_data["capture"] = capture
     app.add_handler(
         TypeHandler(Update, make_owner_gate(owner_id)), group=-1
     )  # runs first
