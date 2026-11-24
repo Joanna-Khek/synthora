@@ -16,6 +16,7 @@ dependencies = [
   "langgraph>=1.2.22",
   "loguru>=0.8.0",
   "mcp[cli]>=2.3.0",
+  "mlflow>=3.18.0",
   "pydantic-settings>=2.16.3",
   "python-telegram-bot>=22.8",
   "pyyaml>=6.0.3",
@@ -31,5 +32,8 @@ version = "0.1.0"
 synthora-bot = "synthora.server.bot.app:main"
 
 [tool.pytest.ini_options]
-addopts = "-m 'not live'"
-markers = ["live: hits the real internet; run with: uv run pytest -m live"]
+addopts = "-m 'not live and not obsidian'"
+markers = [
+  "live: hits the real internet; run with: uv run pytest -m live",
+  "obsidian: needs Obsidian running with the synthora-test vault; run with: uv run pytest -m obsidian"
+]
