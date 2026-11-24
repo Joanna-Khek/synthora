@@ -1,3 +1,4 @@
+import mlflow
 from dataclasses import dataclass
 
 from langchain_core.runnables import Runnable
@@ -29,9 +30,11 @@ class Tools:
         self.distill_model = distill_model  # Claude, for TL;DRs
         self.picker_model = picker_model  # Claude, for picking links
 
+    @mlflow.trace(span_type="TOOL")
     async def read(self, url: str, source_type: SourceType) -> ExtractedSource:
         return await reader.read_url(self.client, url, source_type)
 
+    @mlflow.trace(span_type="TOOL")
     async def resolve(self, url: str) -> str:
         return await reader.resolve_url(self.client, url)
 
