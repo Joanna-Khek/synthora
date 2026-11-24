@@ -1,0 +1,19 @@
+llm:
+  model: claude-haiku-5-5
+  max_tokens: 16000
+  effort: medium      # low | medium | high | xhigh | max
+
+bot:
+  album_wait_seconds: 1.5   # how long to wait for the rest of a photo album
+  preview_chars: 600        # characters of Source text shown in the Telegram reply
+
+extraction:
+  timeout_seconds: 20       # per HTTP request made by the Extraction Server
+
+storage:
+  db_path: data/synthora.db   # relative to the repo root
+
+tracing:
+  enabled: true
+  tracking_uri: http://127.0.0.1:5000
+  experiment: dev-synthora-server
