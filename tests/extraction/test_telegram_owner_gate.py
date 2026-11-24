@@ -7,13 +7,14 @@ contact Telegram.
 
 import asyncio
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
 from telegram import Chat, Message, Update, User
 from telegram.ext import ApplicationHandlerStop, TypeHandler
 
 from synthora.server.bot.app import build_app, make_owner_gate
-from synthora.config import BotConfig
+from synthora.config import BotConfig, LLMConfig, StorageConfig
 
 OWNER_ID = 111
 STRANGER_ID = 999
@@ -59,8 +60,14 @@ def test_gate_runs_before_every_handler():
     because they call the gate function directly.
     """
     app = build_app(
-        "123:FAKE", OWNER_ID, BotConfig(album_wait_seconds=1.5, preview_chars=600)
+        token="123:FAKE",
+        owner_id=OWNER_ID,
+        bot=BotConfig(album_wait_seconds=1.5, preview_chars=600),
+        llm_api_key="fake-key",
+        llm=LLMConfig(model="fake-model", max_tokens=1, effort="low"),
+        storage=StorageConfig(db_path=Path("unused.db")),
     )
+
     first_group = min(app.handlers)
     assert first_group < 0
     assert isinstance(app.handlers[first_group][0], TypeHandler)
