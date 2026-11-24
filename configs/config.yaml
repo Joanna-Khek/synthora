@@ -6,6 +6,7 @@ llm:
 bot:
   album_wait_seconds: 1.5   # how long to wait for the rest of a photo album
   preview_chars: 600        # characters of Source text shown in the Telegram reply
+  max_reply_chars: 4096     # max telegram reply
 
 extraction:
   timeout_seconds: 20       # per HTTP request made by the Extraction Server

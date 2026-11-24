@@ -62,7 +62,7 @@ def test_gate_runs_before_every_handler():
     app = build_app(
         token="123:FAKE",
         owner_id=OWNER_ID,
-        bot=BotConfig(album_wait_seconds=1.5, preview_chars=600),
+        bot=BotConfig(album_wait_seconds=1.5, preview_chars=600, max_reply_chars=4096),
         llm_api_key="fake-key",
         llm=LLMConfig(model="fake-model", max_tokens=1, effort="low"),
         storage=StorageConfig(db_path=Path("unused.db")),

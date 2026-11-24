@@ -25,6 +25,7 @@ class BotConfig(BaseModel):
 
     album_wait_seconds: float = Field(gt=0)
     preview_chars: int = Field(gt=0)
+    max_reply_chars: int = Field(gt=0, le=4096)
 
 
 class ExtractionConfig(BaseModel):
