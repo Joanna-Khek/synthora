@@ -18,7 +18,7 @@ from synthora.bot import parsing, progress, replies, status
 from synthora.capture.distiller import make_distill_model
 from synthora.capture.link_picker import make_picker_model
 from synthora.capture.pipeline import CapturePipeline, MessageIds, ProgressEvent
-from synthora.capture.reader import ExtractionConnection
+from synthora.capture.reader import ExtractionClient
 from synthora.capture.tools import LiveTools
 from synthora.config import (
     ROOT,
@@ -157,19 +157,18 @@ def make_owner_gate(owner_id: int):
 
 
 async def start_extraction_server(app: Application) -> None:
-    connection = ExtractionConnection()
+    extraction = ExtractionClient()
     path = ROOT / app.bot_data["storage"].db_path
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    await connection.start()  # launches the Extraction Server as a child process
-    app.bot_data["extraction"] = connection
+    await extraction.start()  # launches the Extraction Server as a child process
+    app.bot_data["extraction"] = extraction
 
-    # The client only exists after start(), so the Tools are built here.
     api_key: str = app.bot_data["llm_api_key"]
     llm: LLMConfig = app.bot_data["llm"]
     picker_chat = ChatAnthropic(model=llm.model, api_key=api_key, max_tokens=1024)  # pyright: ignore[reportCallIssue]
     tools = LiveTools(
-        client=connection.client,
+        extraction=extraction,
         distill_model=make_distill_model(api_key, llm),
         picker_model=make_picker_model(picker_chat),
         limits=app.bot_data["capture"],

@@ -4,12 +4,12 @@ from typing import Protocol, runtime_checkable
 
 import mlflow
 from langchain_core.runnables import Runnable
-from mcp.client import Client
 from pydantic import BaseModel, ConfigDict
 
 from synthora import tracing
-from synthora.capture import distiller, link_picker, reader
+from synthora.capture import distiller, link_picker
 from synthora.capture.link_picker import LinkSelection
+from synthora.capture.reader import ExtractionClient
 from synthora.config import CaptureConfig
 from synthora.domain import Distillation, ExtractedSource, SourceType
 
@@ -47,12 +47,12 @@ class LiveTools:
 
     def __init__(
         self,
-        client: Client,
+        extraction: ExtractionClient,
         distill_model: Runnable,
         picker_model: Runnable,
         limits: CaptureConfig,
     ) -> None:
-        self.client = client  # talks to the Extraction Server
+        self.extraction = extraction  # the running Extraction Server
         self.distill_model = distill_model  # Claude, for TL;DRs
         self.picker_model = picker_model  # Claude, for picking links
         self.max_linked = limits.max_linked
@@ -60,11 +60,11 @@ class LiveTools:
 
     @mlflow.trace(span_type="TOOL")
     async def read(self, url: str, source_type: SourceType) -> ExtractedSource:
-        return await reader.read_url(self.client, url, source_type)
+        return await self.extraction.read(url, source_type)
 
     @mlflow.trace(span_type="TOOL")
     async def resolve(self, url: str) -> str:
-        return await reader.resolve_url(self.client, url)
+        return await self.extraction.resolve(url)
 
     @mlflow.trace(span_type="CHAIN")
     async def distill(self, source: ExtractedSource) -> Distillation:
