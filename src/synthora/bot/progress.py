@@ -8,8 +8,6 @@ from telegram.error import BadRequest, RetryAfter
 
 from synthora.capture.pipeline import ProgressEvent, StepCount
 
-TELEGRAM_MAX_CHARS = 4096
-
 # What each node has done, shown once it finishes. Nodes not listed here are not shown.
 STEP_DONE = {
     "classify": "🔎 Classified",
@@ -60,14 +58,18 @@ class LiveMessage:
     """A Telegram message we keep editing. Edits are throttled, because Telegram
     limits how often one chat can be edited (roughly once a second)."""
 
-    def __init__(self, message: Message, min_interval: float = 1.0) -> None:
+    def __init__(
+        self, message: Message, max_chars: int, min_interval: float = 1.0
+    ) -> None:
         self.message = message
+        # bot.max_reply_chars; the config caps it at Telegram's 4096.
+        self.max_chars = max_chars
         self.min_interval = min_interval
         self._shown = ""
         self._last_edit = 0.0
 
     async def show(self, text: str, final: bool = False) -> None:
-        text = text[:TELEGRAM_MAX_CHARS]
+        text = text[: self.max_chars]
         if text == self._shown:
             return  # Telegram rejects an edit that changes nothing
         if not final and time.monotonic() - self._last_edit < self.min_interval:

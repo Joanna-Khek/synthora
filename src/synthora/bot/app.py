@@ -78,7 +78,7 @@ SEPARATOR = "\n\n———\n\n"
 
 async def process(ack: Message, captures: list[Capture], deps: BotDeps) -> None:
     """Run every Capture at the same time, showing live progress in one message."""
-    live = progress.LiveMessage(ack)
+    live = progress.LiveMessage(ack, max_chars=deps.config.max_reply_chars)
     sections = ["⏳ waiting…"] * len(captures)
     ids = MessageIds(
         chat_id=ack.chat_id,
