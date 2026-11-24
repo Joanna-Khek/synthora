@@ -1,7 +1,12 @@
 """Turn a CaptureOutcome into the text the bot sends back in Telegram."""
 
 from synthora.capture.pipeline import CaptureOutcome, Failed, Repeat, Succeeded
-from synthora.capture.state import LinkedSource
+from synthora.capture.state import (
+    LinkedDistilled,
+    LinkedFailed,
+    LinkedRead,
+    LinkedSource,
+)
 
 
 def render(outcome: CaptureOutcome) -> str:
@@ -29,7 +34,7 @@ def _succeeded(outcome: Succeeded) -> str:
     parts = ["\n".join(lines)]
 
     if outcome.linked:
-        ok = sum("error" not in item for item in outcome.linked)
+        ok = sum(not isinstance(item, LinkedFailed) for item in outcome.linked)
         parts.append(f"🔗 Linked resources: {ok}/{len(outcome.linked)} read")
         parts += [_linked_line(item) for item in outcome.linked]
     parts += outcome.notes
@@ -38,6 +43,10 @@ def _succeeded(outcome: Succeeded) -> str:
 
 def _linked_line(item: LinkedSource) -> str:
     """One short line per linked resource."""
-    if "error" in item:
-        return f"❌ {item['url'][:80]}: {item['error'][:150]}"
-    return f"✅ {item['source'].title or item['url']}\n   {item['distillation'].tldr}"
+    match item:
+        case LinkedFailed():
+            return f"❌ {item.url[:80]}: {item.error[:150]}"
+        case LinkedDistilled():
+            return f"✅ {item.source.title or item.url}\n   {item.distillation.tldr}"
+        case LinkedRead():  # not reached: distill always runs after read_linked
+            return f"✅ {item.source.title or item.url}"

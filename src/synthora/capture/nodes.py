@@ -6,7 +6,13 @@ from langgraph.runtime import Runtime
 from loguru import logger
 
 from synthora.capture.distiller import DistillError
-from synthora.capture.state import CaptureState, LinkedSource
+from synthora.capture.state import (
+    CaptureState,
+    LinkedDistilled,
+    LinkedFailed,
+    LinkedRead,
+    LinkedSource,
+)
 from synthora.capture.tools import CaptureContext, Tools
 from synthora.domain import (
     Distillation,
@@ -69,18 +75,16 @@ async def read_one_link(url: str, tools: Tools) -> LinkedSource:
         try:
             url = await tools.resolve(url)
         except ExtractionError as e:
-            return {"url": url, "error": f"couldn't resolve the short link: {e}"}
+            return LinkedFailed(url=url, error=f"couldn't resolve the short link: {e}")
 
     source_type = guess_source_type(url)  # the same rules as classify
     try:
         source = await tools.read(url, source_type)
     except ExtractionError as e:
-        return {
-            "url": url,
-            "source_type": source_type,
-            "error": f"couldn't read it: {e}",
-        }
-    return {"url": url, "source_type": source_type, "source": source}
+        return LinkedFailed(
+            url=url, source_type=source_type, error=f"couldn't read it: {e}"
+        )
+    return LinkedRead(url=url, source_type=source_type, source=source)
 
 
 async def read_linked(state: CaptureState, runtime: Runtime[CaptureContext]) -> dict:
@@ -111,7 +115,7 @@ async def distill(state: CaptureState, runtime: Runtime[CaptureContext]) -> dict
     tools = runtime.context.tools
     limit = asyncio.Semaphore(tools.max_concurrent)
 
-    total = 1 + sum("source" in item for item in state.get("linked", []))
+    total = 1 + sum(isinstance(item, LinkedRead) for item in state.get("linked", []))
     done = 0
 
     async def distill_one(source: ExtractedSource) -> Distillation | DistillError:
@@ -128,12 +132,21 @@ async def distill(state: CaptureState, runtime: Runtime[CaptureContext]) -> dict
         return result
 
     async def distill_linked(item: LinkedSource) -> LinkedSource:
-        if "source" not in item:  # reading it failed earlier: nothing to distill
+        if not isinstance(item, LinkedRead):  # it failed earlier: nothing to distill
             return item
-        result = await distill_one(item["source"])
+        result = await distill_one(item.source)
         if isinstance(result, DistillError):
-            return {**item, "error": f"couldn't distill it: {result}"}
-        return {**item, "distillation": result}
+            return LinkedFailed(
+                url=item.url,
+                source_type=item.source_type,
+                error=f"couldn't distill it: {result}",
+            )
+        return LinkedDistilled(
+            url=item.url,
+            source_type=item.source_type,
+            source=item.source,
+            distillation=result,
+        )
 
     main, *linked = await asyncio.gather(
         distill_one(state["source"]),

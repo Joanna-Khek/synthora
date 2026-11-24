@@ -1,16 +1,40 @@
 from typing import NotRequired, TypedDict
 
+from pydantic import BaseModel, ConfigDict
+
 from synthora.domain import Capture, Distillation, ExtractedSource, SourceType
 
 
-class LinkedSource(TypedDict):
-    """One link found inside a post, followed through resolve → read → distill."""
+# One link found inside a post moves through resolve → read → distill, and is
+# always in exactly one of these three states. A failure never fails the post.
+class LinkedRead(BaseModel):
+    """Read, waiting to be distilled (only ever seen between read_linked and distill)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    url: str  # after resolving a short link
+    source_type: SourceType
+    source: ExtractedSource
+
+
+class LinkedDistilled(BaseModel):
+    model_config = ConfigDict(frozen=True)
 
     url: str
-    source_type: NotRequired[SourceType]
-    source: NotRequired[ExtractedSource]
-    distillation: NotRequired[Distillation]
-    error: NotRequired[str]  # why this one link failed; never fails the post
+    source_type: SourceType
+    source: ExtractedSource
+    distillation: Distillation
+
+
+class LinkedFailed(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    url: str
+    error: str  # why this one link failed
+    source_type: SourceType | None = None  # None if it failed before being classified
+
+
+LinkedSource = LinkedRead | LinkedDistilled | LinkedFailed
 
 
 class CaptureState(TypedDict):

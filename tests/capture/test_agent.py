@@ -24,6 +24,7 @@ from synthora.capture.graph import build_capture_graph
 from synthora.capture.link_picker import LinkPicks, LinkSelection, pick_links
 from synthora.capture.links import number_links, unwrap_linkedin_redirect
 from synthora.capture.nodes import is_short_link
+from synthora.capture.state import LinkedDistilled, LinkedFailed
 from synthora.capture.tools import CaptureContext, Tools
 from synthora.domain import (
     Capture,
@@ -199,23 +200,21 @@ def test_post_distills_the_post_and_each_linked_resource():
         "https://lnkd.in/g9q7854R",
     ]
     assert [
-        item["url"] for item in state["linked"]
+        item.url for item in state["linked"]
     ] == [  # resolved, then read by the rules
         "https://github.com/example/gThZcnms",
         "https://github.com/example/g9q7854R",
     ]
-    assert all(
-        item["source_type"] is SourceType.GITHUB_REPO for item in state["linked"]
-    )
+    assert all(item.source_type is SourceType.GITHUB_REPO for item in state["linked"])
     assert state["distillation"].tldr == f"TL;DR of {POST_URL}"
-    assert [item["distillation"].tldr for item in state["linked"]] == [
+    assert all(isinstance(item, LinkedDistilled) for item in state["linked"])
+    assert [item.distillation.tldr for item in state["linked"]] == [
         "TL;DR of https://github.com/example/gThZcnms",
         "TL;DR of https://github.com/example/g9q7854R",
     ]
     assert (
         sum(call.startswith("distill") for call in tools.calls) == 3
     )  # one call per source
-    assert all("error" not in item for item in state["linked"])
 
 
 def test_made_up_link_numbers_from_the_llm_are_ignored():
@@ -232,8 +231,10 @@ def test_a_failed_short_link_fails_only_that_link():
 
     state = run(OneBadResolve(), value=POST_URL)
     assert "error" not in state
-    assert "error" not in state["linked"][0]
-    assert "no external link found" in state["linked"][1]["error"]
+    first, second = state["linked"]
+    assert isinstance(first, LinkedDistilled)
+    assert isinstance(second, LinkedFailed)
+    assert "no external link found" in second.error
 
 
 def test_a_failed_linked_distill_fails_only_that_link():
@@ -245,8 +246,10 @@ def test_a_failed_linked_distill_fails_only_that_link():
 
     state = run(OneBadDistill(), value=POST_URL)
     assert "error" not in state  # the post itself is fine
-    assert "cut off" in state["linked"][0]["error"]
-    assert "distillation" in state["linked"][1]
+    first, second = state["linked"]
+    assert isinstance(first, LinkedFailed)
+    assert "cut off" in first.error
+    assert isinstance(second, LinkedDistilled)
 
 
 def test_a_linked_resource_that_failed_to_read_is_not_distilled():
@@ -259,7 +262,9 @@ def test_a_linked_resource_that_failed_to_read_is_not_distilled():
     tools = OneBadRead()
     state = run(tools, value=POST_URL)
     assert "distill https://github.com/example/g9q7854R" not in tools.calls
-    assert "HTTP 404" in state["linked"][1]["error"]
+    failed = state["linked"][1]
+    assert isinstance(failed, LinkedFailed)
+    assert "HTTP 404" in failed.error
 
 
 def test_failed_post_does_not_pick_links():

@@ -1,5 +1,6 @@
 from synthora.bot.replies import render, render_completed
 from synthora.capture.pipeline import Failed, Repeat, Succeeded
+from synthora.capture.state import LinkedDistilled, LinkedFailed
 from synthora.domain import Distillation, ExtractedSource, SourceType
 
 SOURCE = ExtractedSource(tool="fake", url="https://a.com", title="A title", text="x")
@@ -8,12 +9,13 @@ DISTILLATION = Distillation(
 )
 
 
-def linked_ok(url: str) -> dict:
-    return {
-        "url": url,
-        "source": SOURCE.model_copy(update={"url": url, "title": None}),
-        "distillation": DISTILLATION,
-    }
+def linked_ok(url: str) -> LinkedDistilled:
+    return LinkedDistilled(
+        url=url,
+        source_type=SourceType.WEB_ARTICLE,
+        source=SOURCE.model_copy(update={"url": url, "title": None}),
+        distillation=DISTILLATION,
+    )
 
 
 def test_success_shows_title_tldr_and_key_ideas():
@@ -25,7 +27,10 @@ def test_success_shows_title_tldr_and_key_ideas():
 
 
 def test_linked_resources_are_counted_and_listed():
-    linked = [linked_ok("https://b.com"), {"url": "https://c.com", "error": "HTTP 404"}]
+    linked = [
+        linked_ok("https://b.com"),
+        LinkedFailed(url="https://c.com", error="HTTP 404"),
+    ]
     text = render(
         Succeeded(
             source=SOURCE,
