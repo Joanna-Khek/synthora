@@ -28,6 +28,13 @@ class BotConfig(BaseModel):
     max_reply_chars: int = Field(gt=0, le=4096)
 
 
+class CaptureConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    max_linked: int = Field(gt=0)
+    max_concurrent: int = Field(gt=0)
+
+
 class ExtractionConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -69,6 +76,7 @@ class Settings(BaseSettings):
     # From .yaml
     llm: LLMConfig
     bot: BotConfig
+    capture: CaptureConfig
     extraction: ExtractionConfig
     storage: StorageConfig
     tracing: TracingConfig

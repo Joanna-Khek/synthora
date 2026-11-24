@@ -16,7 +16,7 @@ from synthora import store
 from synthora.capture.distiller import DistillError
 from synthora.capture.graph import build_capture_graph
 from synthora.capture.state import CaptureState, LinkedSource
-from synthora.capture.tools import Tools
+from synthora.capture.tools import CaptureContext, Tools
 from synthora.domain import Capture, Distillation, ExtractedSource, SourceType
 
 
@@ -182,7 +182,9 @@ class CapturePipeline:
         """Stream the graph, merging each step's changes into `state` as they arrive."""
         initial: CaptureState = {"capture": capture}
         async for mode, chunk in self._graph.astream(
-            initial, context=self._tools, stream_mode=["updates", "custom"]
+            initial,
+            context=CaptureContext(tools=self._tools),
+            stream_mode=["updates", "custom"],
         ):
             # With several stream modes, LangGraph types each chunk loosely; both of
             # ours are dicts: {node: update} for "updates", the node's dict for "custom".

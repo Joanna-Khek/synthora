@@ -1,7 +1,7 @@
 """Tests for the agent package: link finding, link picking and the capture graph.
 
 No network, no MCP server, no API calls: every outside dependency is faked
-by subclassing Tools and overriding only the methods a test needs.
+by FakeTools (see fakes.py), which satisfies the Tools protocol.
 """
 
 import asyncio
@@ -21,10 +21,10 @@ from langchain_core.runnables import RunnableLambda
 
 from synthora.capture.distiller import DistillError
 from synthora.capture.graph import build_capture_graph
-from synthora.capture.link_picker import LinkPicks, keep_valid_picks, pick_links
-from synthora.capture.links import PostLink, number_links, unwrap_linkedin_redirect
+from synthora.capture.link_picker import LinkPicks, LinkSelection, pick_links
+from synthora.capture.links import number_links, unwrap_linkedin_redirect
 from synthora.capture.nodes import is_short_link
-from synthora.capture.tools import Tools
+from synthora.capture.tools import CaptureContext, Tools
 from synthora.domain import (
     Capture,
     ExtractionError,
@@ -35,7 +35,10 @@ from synthora.domain import (
 def run(tools: Tools, value: str = ARTICLE_URL, kind: str = "url") -> dict:
     graph = build_capture_graph()
     return asyncio.run(
-        graph.ainvoke({"capture": Capture(kind=kind, value=value)}, context=tools)
+        graph.ainvoke(
+            {"capture": Capture(kind=kind, value=value)},
+            context=CaptureContext(tools=tools),
+        )
     )
 
 
@@ -70,34 +73,44 @@ def test_number_links_numbers_each_unique_link_once_and_skips_images():
 
 
 # ---------------------------------------------------------------- link_picker.py
-LINKS = [
-    PostLink(id=i, url=f"https://example.com/{i}", label=str(i)) for i in (1, 2, 3)
-]
+def llm_answering(link_ids: list[int], seen: dict | None = None) -> RunnableLambda:
+    """A fake picker model that always answers with these link numbers."""
+
+    def answer(messages):
+        if seen is not None:
+            seen["human"] = messages[1][1]
+        return LinkPicks(reasoning="Fake.", link_ids=link_ids)
+
+    return RunnableLambda(answer)
 
 
-def test_keep_valid_picks_drops_made_up_numbers_and_duplicates():
-    chosen = keep_valid_picks([2, 99, 1, 2, -1], LINKS, ceiling=25)
-    assert [link.id for link in chosen] == [2, 1]  # the LLM's order is kept
-
-
-def test_keep_valid_picks_stops_at_the_ceiling():
-    assert len(keep_valid_picks([1, 2, 3], LINKS, ceiling=2)) == 2
+def pick(link_ids: list[int], ceiling: int = 25) -> LinkSelection:
+    return asyncio.run(pick_links(llm_answering(link_ids), POST, ceiling))
 
 
 def test_pick_links_shows_the_model_numbered_links_inside_post_tags():
     seen = {}
+    selection = asyncio.run(pick_links(llm_answering([1, 2], seen), POST, ceiling=25))
 
-    def fake_llm(messages):
-        seen["human"] = messages[1][1]
-        return LinkPicks(
-            reasoning="Two repos; link 3 is the author's product.", link_ids=[1, 2]
-        )
-
-    links, ids = asyncio.run(pick_links(RunnableLambda(fake_llm), POST))
-    assert ids == [1, 2]
-    assert len(links) == 3
+    assert [link.id for link in selection.chosen] == [1, 2]
+    assert not selection.hit_ceiling
     assert seen["human"].startswith("<post>") and seen["human"].endswith("</post>")
     assert "[link 3]" in seen["human"]
+
+
+def test_made_up_numbers_and_duplicates_are_dropped():
+    selection = pick([2, 99, 1, 2, -1])
+    assert [link.id for link in selection.chosen] == [2, 1]  # the LLM's order is kept
+
+
+def test_picks_stop_at_the_ceiling():
+    selection = pick([1, 2, 3], ceiling=2)
+    assert [link.id for link in selection.chosen] == [1, 2]
+    assert selection.hit_ceiling
+
+
+def test_exactly_reaching_the_ceiling_is_not_hitting_it():
+    assert not pick([1, 2], ceiling=2).hit_ceiling
 
 
 def test_pick_links_skips_the_llm_when_the_post_has_no_links():
@@ -105,10 +118,10 @@ def test_pick_links_skips_the_llm_when_the_post_has_no_links():
         raise AssertionError("the LLM was called for a post without links")
 
     no_links = POST.model_copy(update={"text": "Just an opinion, no links."})
-    assert asyncio.run(pick_links(RunnableLambda(must_not_be_called), no_links)) == (
-        [],
-        [],
+    selection = asyncio.run(
+        pick_links(RunnableLambda(must_not_be_called), no_links, ceiling=25)
     )
+    assert selection == LinkSelection(chosen=[], hit_ceiling=False)
 
 
 # ---------------------------------------------------------------- graph: one ordinary link

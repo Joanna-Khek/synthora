@@ -6,9 +6,8 @@ from langgraph.runtime import Runtime
 from loguru import logger
 
 from synthora.capture.distiller import DistillError
-from synthora.capture.link_picker import keep_valid_picks
 from synthora.capture.state import CaptureState, LinkedSource
-from synthora.capture.tools import Tools
+from synthora.capture.tools import CaptureContext, Tools
 from synthora.domain import (
     Distillation,
     ExtractedSource,
@@ -32,9 +31,9 @@ async def classify(state: CaptureState) -> dict:
 
 
 # ---------------------------------------------------------------- 2. read
-async def read(state: CaptureState, runtime: Runtime[Tools]) -> dict:
+async def read(state: CaptureState, runtime: Runtime[CaptureContext]) -> dict:
     try:
-        source = await runtime.context.read(
+        source = await runtime.context.tools.read(
             state["capture"].value, state["source_type"]
         )
     except ExtractionError as e:
@@ -43,19 +42,18 @@ async def read(state: CaptureState, runtime: Runtime[Tools]) -> dict:
 
 
 # ---------------------------------------------------------------- 3. pick_links (LinkedIn posts only)
-async def pick_links(state: CaptureState, runtime: Runtime[Tools]) -> dict:
-    """Ask the LLM which links to follow, then keep only valid picks (checked in code)."""
-    tools = runtime.context
-    links, link_ids = await tools.pick_links(state["source"])
-    chosen = keep_valid_picks(link_ids, links, tools.max_linked)
+async def pick_links(state: CaptureState, runtime: Runtime[CaptureContext]) -> dict:
+    """Ask the LLM which links to follow; the picks come back already checked."""
+    tools = runtime.context.tools
+    selection = await tools.pick_links(state["source"])
 
     notes = []
-    if len(chosen) == tools.max_linked:
+    if selection.hit_ceiling:
         logger.warning(
             f"hit the safety ceiling of {tools.max_linked} links for {state['capture'].value}"
         )
         notes.append(f"⚠️ stopped at the safety ceiling of {tools.max_linked} links")
-    return {"linked_urls": [link.url for link in chosen], "notes": notes}
+    return {"linked_urls": [link.url for link in selection.chosen], "notes": notes}
 
 
 # ---------------------------------------------------------------- 4. read_linked (LinkedIn posts only)
@@ -85,9 +83,9 @@ async def read_one_link(url: str, tools: Tools) -> LinkedSource:
     return {"url": url, "source_type": source_type, "source": source}
 
 
-async def read_linked(state: CaptureState, runtime: Runtime[Tools]) -> dict:
+async def read_linked(state: CaptureState, runtime: Runtime[CaptureContext]) -> dict:
     """Read every picked link, at most `max_concurrent` at a time."""
-    tools = runtime.context
+    tools = runtime.context.tools
     limit = asyncio.Semaphore(tools.max_concurrent)
     total = len(state["linked_urls"])
     done = 0
@@ -105,12 +103,12 @@ async def read_linked(state: CaptureState, runtime: Runtime[Tools]) -> dict:
 
 
 # ---------------------------------------------------------------- 5. distill
-async def distill(state: CaptureState, runtime: Runtime[Tools]) -> dict:
+async def distill(state: CaptureState, runtime: Runtime[CaptureContext]) -> dict:
     """Distill the source you sent AND every linked source that was read.
 
     One stage, but one LLM call per source, so each gets its own TL;DR.
     """
-    tools = runtime.context
+    tools = runtime.context.tools
     limit = asyncio.Semaphore(tools.max_concurrent)
 
     total = 1 + sum("source" in item for item in state.get("linked", []))

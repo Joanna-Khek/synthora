@@ -8,6 +8,10 @@ bot:
   preview_chars: 600        # characters of Source text shown in the Telegram reply
   max_reply_chars: 4096     # max telegram reply
 
+capture:
+  max_linked: 25            # safety ceiling on links followed from one LinkedIn post
+  max_concurrent: 4         # links read or distilled at the same time
+
 extraction:
   timeout_seconds: 20       # per HTTP request made by the Extraction Server
 

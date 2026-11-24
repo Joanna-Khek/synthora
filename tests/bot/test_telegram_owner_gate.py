@@ -14,7 +14,7 @@ from telegram import Chat, Message, Update, User
 from telegram.ext import ApplicationHandlerStop, TypeHandler
 
 from synthora.bot.app import build_app, make_owner_gate
-from synthora.config import BotConfig, LLMConfig, StorageConfig
+from synthora.config import BotConfig, CaptureConfig, LLMConfig, StorageConfig
 
 OWNER_ID = 111
 STRANGER_ID = 999
@@ -66,6 +66,7 @@ def test_gate_runs_before_every_handler():
         llm_api_key="fake-key",
         llm=LLMConfig(model="fake-model", max_tokens=1, effort="low"),
         storage=StorageConfig(db_path=Path("unused.db")),
+        capture=CaptureConfig(max_linked=25, max_concurrent=4),
     )
 
     first_group = min(app.handlers)

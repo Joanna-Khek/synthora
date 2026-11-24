@@ -1,5 +1,5 @@
 from langchain_core.runnables import Runnable
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from synthora.capture.links import PostLink, number_links
 from synthora.domain import ExtractedSource
@@ -26,25 +26,34 @@ def build_picker_messages(numbered_text: str) -> list[tuple[str, str]]:
     return [("system", picker_prompt.PROMPT), ("human", f"<post>\n{text}\n</post>")]
 
 
+class LinkSelection(BaseModel):
+    """The links to follow, already checked: real link numbers only, no duplicates."""
+
+    model_config = ConfigDict(frozen=True)
+
+    chosen: list[PostLink]  # in the order the LLM gave them, at most the ceiling
+    hit_ceiling: bool  # there were more valid picks than the ceiling allowed
+
+
 async def pick_links(
-    model: Runnable, post: ExtractedSource
-) -> tuple[list[PostLink], list[int]]:
-    """Ask the LLM. Returns all links found, plus the numbers it picked (NOT yet validated)."""
+    model: Runnable, post: ExtractedSource, ceiling: int
+) -> LinkSelection:
+    """Ask the LLM which of the post's links are worth following, then check its answer."""
     numbered_text, links = number_links(post.text)
-    if not links:
-        return [], []  # no links: skip the LLM call entirely
+    if not links:  # no links: skip the LLM call entirely
+        return LinkSelection(chosen=[], hit_ceiling=False)
     picks: LinkPicks = await model.ainvoke(build_picker_messages(numbered_text))
-    return links, picks.link_ids
+    return select_links(links, picks.link_ids, ceiling)
 
 
-def keep_valid_picks(
-    link_ids: list[int], links: list[PostLink], ceiling: int
-) -> list[PostLink]:
-    """The code-side guard: only real link numbers, no duplicates, at most `ceiling`."""
+def select_links(
+    links: list[PostLink], link_ids: list[int], ceiling: int
+) -> LinkSelection:
+    """The code-side guard on the LLM's answer: never trust its numbers as given."""
     by_id = {link.id: link for link in links}
-    chosen: list[PostLink] = []
+    valid: list[PostLink] = []
     for link_id in link_ids:
         link = by_id.get(link_id)
-        if link is not None and link not in chosen:
-            chosen.append(link)
-    return chosen[:ceiling]
+        if link is not None and link not in valid:
+            valid.append(link)
+    return LinkSelection(chosen=valid[:ceiling], hit_ceiling=len(valid) > ceiling)

@@ -15,7 +15,7 @@ from synthora.capture.nodes import (
     read_linked,
 )
 from synthora.capture.state import CaptureState
-from synthora.capture.tools import Tools
+from synthora.capture.tools import CaptureContext
 from synthora.domain import SourceType
 
 
@@ -36,7 +36,7 @@ def after_read(state: CaptureState) -> str:
 
 # ---------------------------------------------------------------- build
 def build_capture_graph():
-    builder = StateGraph(CaptureState, context_schema=Tools)
+    builder = StateGraph(CaptureState, context_schema=CaptureContext)
 
     builder.add_node("classify", classify)
     builder.add_node("read", read)

@@ -19,8 +19,15 @@ from synthora.capture.distiller import make_distill_model
 from synthora.capture.link_picker import make_picker_model
 from synthora.capture.pipeline import CapturePipeline, MessageIds, ProgressEvent
 from synthora.capture.reader import ExtractionConnection
-from synthora.capture.tools import Tools
-from synthora.config import ROOT, BotConfig, LLMConfig, Settings, StorageConfig
+from synthora.capture.tools import LiveTools
+from synthora.config import (
+    ROOT,
+    BotConfig,
+    CaptureConfig,
+    LLMConfig,
+    Settings,
+    StorageConfig,
+)
 from synthora.domain import Capture
 from synthora.tracing import setup_tracing
 
@@ -161,10 +168,11 @@ async def start_extraction_server(app: Application) -> None:
     api_key: str = app.bot_data["llm_api_key"]
     llm: LLMConfig = app.bot_data["llm"]
     picker_chat = ChatAnthropic(model=llm.model, api_key=api_key, max_tokens=1024)  # pyright: ignore[reportCallIssue]
-    tools = Tools(
+    tools = LiveTools(
         client=connection.client,
         distill_model=make_distill_model(api_key, llm),
         picker_model=make_picker_model(picker_chat),
+        limits=app.bot_data["capture"],
     )
     app.bot_data["db"] = store.connect(path)
     app.bot_data["pipeline"] = CapturePipeline(app.bot_data["db"], tools)
@@ -189,6 +197,7 @@ def build_app(
     llm_api_key: str,
     llm: LLMConfig,
     storage: StorageConfig,
+    capture: CaptureConfig,
 ) -> Application:
     app = (
         Application.builder()
@@ -201,6 +210,7 @@ def build_app(
     app.bot_data["llm_api_key"] = llm_api_key
     app.bot_data["llm"] = llm
     app.bot_data["storage"] = storage
+    app.bot_data["capture"] = capture
     app.add_handler(
         TypeHandler(Update, make_owner_gate(owner_id)), group=-1
     )  # runs first
@@ -225,6 +235,7 @@ def main() -> None:
         llm_api_key=settings.llm_api_key.get_secret_value(),
         llm=settings.llm,
         storage=settings.storage,
+        capture=settings.capture,
     )
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 

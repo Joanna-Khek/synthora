@@ -1,12 +1,13 @@
 """Fake Tools and a sample LinkedIn post, shared by the graph and pipeline tests.
 
 No network, no MCP server, no API calls: every outside dependency is faked
-by subclassing Tools and overriding only the methods a test needs.
+by FakeTools, which satisfies the Tools protocol; a test subclasses it and
+overrides only the methods it needs to break.
 """
 
 from synthora.capture.distiller import DistillError
-from synthora.capture.links import PostLink, number_links
-from synthora.capture.tools import Tools
+from synthora.capture.link_picker import LinkSelection, select_links
+from synthora.capture.links import number_links
 from synthora.domain import Distillation, ExtractedSource, ExtractionError, SourceType
 
 
@@ -41,8 +42,11 @@ POST = ExtractedSource(
 
 
 # ---------------------------------------------------------------- fake tools
-class FakeTools(Tools):
+class FakeTools:
     """Every method works; a test subclasses this and breaks only what it needs."""
+
+    max_linked = 25
+    max_concurrent = 4
 
     def __init__(self, picks: list[int] | None = None) -> None:
         self.picks = [1, 2] if picks is None else picks  # what the "LLM" picks
@@ -66,12 +70,11 @@ class FakeTools(Tools):
         self.calls.append(f"resolve {url}")
         return "https://github.com/example/" + url.rsplit("/", 1)[1]
 
-    async def pick_links(
-        self, post: ExtractedSource
-    ) -> tuple[list[PostLink], list[int]]:
+    async def pick_links(self, post: ExtractedSource) -> LinkSelection:
+        """The "LLM" answers with self.picks; the real code-side check still applies."""
         self.calls.append("pick_links")
         _, links = number_links(post.text)
-        return links, self.picks
+        return select_links(links, self.picks, self.max_linked)
 
 
 class BrokenReadTools(FakeTools):
