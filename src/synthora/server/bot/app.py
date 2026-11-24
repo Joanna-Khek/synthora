@@ -144,10 +144,11 @@ async def run_capture(capture: Capture, bot_data: dict, on_progress, ids) -> str
     lines: list[str] = []
     counter = ""
 
-    with mlflow.start_span(name="capture") as span:
+    with mlflow.start_span(name="capture", span_type="CHAIN") as span:
         span.set_inputs(
             {"url": capture.value, "kind": capture.kind, "comment": capture.comment}
         )
+        mlflow.update_current_trace(tags={"capture_id": str(capture_id)})
         try:
             async for mode, chunk in bot_data["graph"].astream(
                 {"capture": capture},
@@ -177,6 +178,10 @@ async def run_capture(capture: Capture, bot_data: dict, on_progress, ids) -> str
         span.set_outputs(
             {"error": state.get("error"), "reply_text": state.get("reply_text")}
         )
+        mlflow.update_current_trace(
+            tags={"outcome": "failed" if "error" in state else "queued"}
+        )
+
         if "error" in state:
             store.mark_failed(
                 db,
