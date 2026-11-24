@@ -1,5 +1,6 @@
 import re
 import asyncio
+import mlflow
 from loguru import logger
 from telegram import Update, LinkPreviewOptions, Message
 from telegram.ext import (
@@ -13,15 +14,16 @@ from telegram.ext import (
 )
 from langchain_anthropic import ChatAnthropic
 
-from synthora.server.bot import parsing, source_type, progress
-from synthora.server.schemas import Capture
+from synthora.server.bot import parsing, source_type, progress, status
+from synthora.server.schemas import Capture, ExtractedSource
+from synthora.server.distiller import DistillError, make_distill_model
 from synthora.agent.graph import build_capture_graph
 from synthora.agent.link_picker import make_picker_model
 from synthora.agent.tools import Tools
-from synthora.config import BotConfig, LLMConfig, Settings
-from synthora.server.distiller import make_distill_model
+from synthora.config import ROOT, BotConfig, LLMConfig, Settings, StorageConfig
 from synthora.server.reader import ExtractionConnection
-
+from synthora.server.database import store
+from synthora.tracing import setup_tracing
 
 TELEGRAM_MAX_CHARS = 4096
 
@@ -49,6 +51,20 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def on_capture(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = update.message
+    replied_to = message.reply_to_message
+    if (
+        replied_to
+        and replied_to.from_user
+        and replied_to.from_user.id == context.bot.id
+    ):
+        failed = store.find_failed_by_reply(
+            context.bot_data["db"], message.chat_id, replied_to.message_id
+        )
+        if failed:
+            context.application.create_task(
+                complete_from_reply(message, failed, context.bot_data)
+            )
+            return
     parsed = parsing.parse_message(message)
     logger.info(f"parsed: {parsed}")
 
@@ -94,13 +110,19 @@ async def process(ack: Message, captures: list[Capture], bot_data: dict) -> None
     live = progress.LiveMessage(ack)
     sections = ["⏳ waiting…"] * len(captures)
 
+    ids = {
+        "chat_id": ack.chat_id,
+        "user_message_id": ack.reply_to_message.message_id,
+        "reply_message_id": ack.message_id,
+    }
+
     async def run_one(i: int, capture: Capture) -> None:
         async def on_progress(text: str) -> None:
             sections[i] = f"{capture.value[:60]}\n{text}"
             await live.show(SEPARATOR.join(sections))
 
         try:
-            sections[i] = await run_capture(capture, bot_data, on_progress)
+            sections[i] = await run_capture(capture, bot_data, on_progress, ids)
         except Exception as e:  # a bug: report it, don't let it hide the other captures
             logger.opt(exception=e).error(f"bug while processing {capture.value}")
             sections[i] = (
@@ -111,28 +133,97 @@ async def process(ack: Message, captures: list[Capture], bot_data: dict) -> None
     await live.show(SEPARATOR.join(sections), final=True)
 
 
-async def run_capture(capture: Capture, bot_data: dict, on_progress) -> str:
+async def run_capture(capture: Capture, bot_data: dict, on_progress, ids) -> str:
     """Run one Capture through the graph, reporting each step; return the reply text."""
+    db = bot_data["db"]
+    if capture.kind == "url" and (previous := store.find_successful(db, capture.value)):
+        return f"🔁 already captured on {previous['created_at'][:10]}\n\n{previous['tldr']}"
+
+    capture_id = store.add_capture(db, capture, **ids)
+    state: dict = {}
     lines: list[str] = []
     counter = ""
-    reply_text = ""
-    async for mode, chunk in bot_data["graph"].astream(
-        {"capture": capture},
-        context=bot_data["tools"],
-        stream_mode=["updates", "custom"],
-    ):
-        if mode == "updates":
-            for node, update in chunk.items():
-                update = update or {}
-                reply_text = update.get("reply_text", reply_text)
-                line = progress.describe_update(node, update)
-                if line:
-                    lines.append(line)
-                    counter = ""  # a step finished, so its counter is no longer needed
-        else:  # "custom": a counter from read_linked or distill
-            counter = f"⏳ {chunk['step']}: {chunk['done']}/{chunk['total']}"
-        await on_progress("\n".join(lines + [counter or "⏳ working…"]))
-    return reply_text
+
+    with mlflow.start_span(name="capture") as span:
+        span.set_inputs(
+            {"url": capture.value, "kind": capture.kind, "comment": capture.comment}
+        )
+        try:
+            async for mode, chunk in bot_data["graph"].astream(
+                {"capture": capture},
+                context=bot_data["tools"],
+                stream_mode=["updates", "custom"],
+            ):
+                if mode == "updates":
+                    for node, update in chunk.items():
+                        update = update or {}
+                        state |= update
+                        line = progress.describe_update(node, update)
+                        if line:
+                            lines.append(line)
+                            counter = ""  # a step finished, so its counter is no longer needed
+                else:  # "custom": a counter from read_linked or distill
+                    counter = f"⏳ {chunk['step']}: {chunk['done']}/{chunk['total']}"
+                await on_progress("\n".join(lines + [counter or "⏳ working…"]))
+
+        except Exception as e:  # a bug: don't leave the row stuck in 'processing'
+            store.mark_failed(
+                db,
+                capture_id,
+                reason=f"bug: {type(e).__name__}",
+                source_type=state.get("source_type"),
+            )
+            raise
+        span.set_outputs(
+            {"error": state.get("error"), "reply_text": state.get("reply_text")}
+        )
+        if "error" in state:
+            store.mark_failed(
+                db,
+                capture_id,
+                reason=state["error"],
+                source_type=state.get("source_type"),
+            )
+        else:
+            store.mark_queued(
+                db,
+                capture_id,
+                source_type=state["source_type"],
+                tldr=state["distillation"].tldr,
+                full_text=state["source"].text,
+            )
+        return state.get("reply_text", "")
+
+
+async def complete_from_reply(message: Message, failed: list, bot_data: dict) -> None:
+    """FR-22: use the user's pasted text to complete a Failed Capture."""
+    if len(failed) > 1:
+        await message.reply_text(
+            f"That message has {len(failed)} failed Captures, so I can't tell which "
+            "one this completes. Send each link on its own, then reply to its failure.",
+            do_quote=True,
+        )
+        return
+    if not message.text:
+        await message.reply_text(
+            "Screenshots aren't supported yet. Paste the text instead.", do_quote=True
+        )
+        return
+
+    row = failed[0]
+    ack = await message.reply_text("Distilling your text…", do_quote=True)
+    source = ExtractedSource(tool="pasted_by_user", url=row["value"], text=message.text)
+    try:
+        distillation = await bot_data["tools"].distill(source)
+    except DistillError as e:
+        await ack.edit_text(f"❌ couldn't distill it: {e}")
+        return
+
+    store.complete_failed(
+        bot_data["db"], row["id"], tldr=distillation.tldr, full_text=message.text
+    )
+
+    await ack.edit_text(f"✅ completed {row['value']}\n\nTL;DR: {distillation.tldr}")
 
 
 def format_captures(captures: list[Capture]) -> str:
@@ -171,6 +262,9 @@ def make_owner_gate(owner_id: int):
 
 async def start_extraction_server(app: Application) -> None:
     connection = ExtractionConnection()
+    path = ROOT / app.bot_data["storage"].db_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+
     await connection.start()  # launches the Extraction Server as a child process
     app.bot_data["extraction"] = connection
 
@@ -184,10 +278,19 @@ async def start_extraction_server(app: Application) -> None:
         picker_model=make_picker_model(picker_chat),
     )
     app.bot_data["graph"] = build_capture_graph()
+    app.bot_data["db"] = store.connect(path)
+
+
+async def show_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text(
+        status.build_status(context.bot_data["db"]),
+        link_preview_options=LinkPreviewOptions(is_disabled=True),
+    )
 
 
 async def stop_extraction_server(app: Application) -> None:
     await app.bot_data["extraction"].stop()
+    app.bot_data["db"].close()
 
 
 def build_app(
@@ -196,6 +299,7 @@ def build_app(
     bot: BotConfig,
     llm_api_key: str,
     llm: LLMConfig,
+    storage: StorageConfig,
 ) -> Application:
     app = (
         Application.builder()
@@ -207,6 +311,7 @@ def build_app(
     app.bot_data["config"] = bot
     app.bot_data["llm_api_key"] = llm_api_key
     app.bot_data["llm"] = llm
+    app.bot_data["storage"] = storage
     app.add_handler(
         TypeHandler(Update, make_owner_gate(owner_id)), group=-1
     )  # runs first
@@ -214,18 +319,23 @@ def build_app(
     app.add_handler(
         MessageHandler((filters.TEXT | filters.PHOTO) & ~filters.COMMAND, on_capture)
     )
+    app.add_handler(CommandHandler("status", show_status))
+
     return app
 
 
 # Bot don't handle the youtube key or github token. Only the extraction server processs reads them.
 def main() -> None:
     settings = Settings()
+    setup_tracing(config=settings.tracing)
+
     app = build_app(
         token=settings.telegram_token.get_secret_value(),
         owner_id=settings.owner_telegram_id,
         bot=settings.bot,
         llm_api_key=settings.llm_api_key.get_secret_value(),
         llm=settings.llm,
+        storage=settings.storage,
     )
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
