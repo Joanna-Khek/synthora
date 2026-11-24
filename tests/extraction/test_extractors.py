@@ -4,8 +4,8 @@ import shutil
 import httpx
 import pytest
 
-from synthora.server.extraction import (
-    ExtractionError,
+from synthora.domain import ExtractionError
+from synthora.extraction import (
     fetch_html,
     make_client,
     extract_article,

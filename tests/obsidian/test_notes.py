@@ -11,7 +11,7 @@ from synthora.obsidian.notes import (
     SourceNote,
     safe_note_name,
 )
-from synthora.server.schemas import SourceType
+from synthora.domain import SourceType
 
 
 def split(markdown: str) -> tuple[dict, str]:

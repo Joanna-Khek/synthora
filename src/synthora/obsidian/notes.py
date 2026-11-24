@@ -5,7 +5,7 @@ from typing import Annotated, Literal
 import yaml
 from pydantic import AfterValidator, BaseModel, ConfigDict
 
-from synthora.server.schemas import SourceType
+from synthora.domain import SourceType
 
 Relation = Literal[
     "is_a", "part_of", "uses", "improves_on", "contrasts_with", "introduced_by"

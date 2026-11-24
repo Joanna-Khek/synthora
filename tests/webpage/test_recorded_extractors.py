@@ -4,8 +4,8 @@ import shutil
 import pytest
 
 from recorded_web import replay_client
-from synthora.server.extraction import (
-    ExtractionError,
+from synthora.domain import ExtractionError
+from synthora.extraction import (
     extract_article,
     extract_with_defuddle,
     read_github_repo,

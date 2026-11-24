@@ -5,8 +5,9 @@ import asyncio
 import httpx
 import pytest
 
-from synthora.server.extraction.fetch import ExtractionError, make_client
-from synthora.server.extraction.github import parse_repo_url, read_github_repo
+from synthora.domain import ExtractionError
+from synthora.extraction.fetch import make_client
+from synthora.extraction.github import parse_repo_url, read_github_repo
 
 REPO_URL = "https://github.com/obsidianmd/obsidian-skills"
 REPO_JSON = {

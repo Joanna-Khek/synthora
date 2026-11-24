@@ -10,7 +10,7 @@ import pytest
 from mcp.client import Client
 from pydantic import SecretStr
 
-from synthora.server.extraction import mcp_server
+from synthora.extraction import mcp_server
 from synthora.config import ExtractionConfig
 
 PARAGRAPH = (

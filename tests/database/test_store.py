@@ -2,8 +2,8 @@ import sqlite3
 
 import pytest
 
-from synthora.server.database.store import MIGRATIONS, connect
-from synthora.server.database.store import (
+from synthora.store import MIGRATIONS, connect
+from synthora.store import (
     add_capture,
     find_successful,
     mark_failed,
@@ -16,8 +16,8 @@ from synthora.server.database.store import (
     mark_pulled,
     mark_written,
 )
-from synthora.server.bot.status import build_status
-from synthora.server.schemas import Capture
+from synthora.bot.status import build_status
+from synthora.domain import Capture
 
 
 def _insert_capture(conn: sqlite3.Connection, **overrides) -> int:

@@ -5,8 +5,9 @@ import asyncio
 import httpx
 import pytest
 
-from synthora.server.extraction.fetch import ExtractionError, make_client
-from synthora.server.extraction.youtube import read_youtube_metadata, video_id_from_url
+from synthora.domain import ExtractionError
+from synthora.extraction.fetch import make_client
+from synthora.extraction.youtube import read_youtube_metadata, video_id_from_url
 
 VIDEO_URL = "https://youtu.be/abc123XYZ_-"
 VIDEO_JSON = {

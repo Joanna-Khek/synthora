@@ -17,7 +17,7 @@ repos:
         exclude: ^notebooks/
       - id: name-tests-test
         args: [--django]
-        exclude: ^tests/webpage/recorded_web\.py$
+        exclude: ^tests/(webpage/recorded_web|capture/fakes)\.py$
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
     # Ruff version.

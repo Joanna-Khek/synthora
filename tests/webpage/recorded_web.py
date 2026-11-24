@@ -124,14 +124,14 @@ def save_case(case: str, recorder: RecordingTransport) -> None:
 
 async def record_all() -> None:
     from synthora.config import Settings
-    from synthora.server.extraction import (
-        ExtractionError,
+    from synthora.domain import ExtractionError
+    from synthora.extraction import (
         extract_article,
         extract_with_defuddle,
         read_github_repo,
         read_youtube_metadata,
     )
-    from synthora.server.extraction.fetch import USER_AGENT
+    from synthora.extraction.fetch import USER_AGENT
 
     settings = Settings()
     youtube_key = settings.google_api_key.get_secret_value()

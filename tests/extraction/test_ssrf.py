@@ -5,9 +5,10 @@ import asyncio
 import httpx
 import pytest
 
-from synthora.server.extraction import ssrf
-from synthora.server.extraction.fetch import ExtractionError, fetch_html, make_client
-from synthora.server.extraction.ssrf import BlockedURLError, check_url
+from synthora.extraction import ssrf
+from synthora.domain import ExtractionError
+from synthora.extraction.fetch import fetch_html, make_client
+from synthora.extraction.ssrf import BlockedURLError, check_url
 from synthora.config import Settings
 
 settings = Settings()
