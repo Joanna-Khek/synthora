@@ -33,6 +33,18 @@ class ExtractionConfig(BaseModel):
     timeout_seconds: float = Field(gt=0)
 
 
+class StorageConfig(BaseModel):
+    db_path: Path
+
+
+class TracingConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    enabled: bool = True
+    tracking_uri: str
+    experiment: str
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=ROOT / ".env",
@@ -57,6 +69,8 @@ class Settings(BaseSettings):
     llm: LLMConfig
     bot: BotConfig
     extraction: ExtractionConfig
+    storage: StorageConfig
+    tracing: TracingConfig
 
     @classmethod
     def settings_customise_sources(
