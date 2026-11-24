@@ -12,3 +12,6 @@ __pycache__/
 
 # local experiments
 .ipynb_checkpoints/
+
+# data
+data/

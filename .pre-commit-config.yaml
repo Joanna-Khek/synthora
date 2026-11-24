@@ -6,7 +6,9 @@ repos:
     rev: v5.0.0
     hooks:
       - id: end-of-file-fixer
+        exclude: ^(skills|tests/webpage/fixtures)/
       - id: trailing-whitespace
+        exclude: ^(skills|tests/webpage/fixtures)/
       - id: check-yaml
       - id: requirements-txt-fixer
       - id: check-merge-conflict
