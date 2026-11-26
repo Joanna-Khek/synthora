@@ -22,9 +22,18 @@ def make_distill_model(api_key: str, llm: LLMConfig) -> Runnable:
     )
 
 
-def build_messages(source: ExtractedSource) -> list[tuple[str, str]]:
+def build_messages(source: ExtractedSource, *, max_chars: int) -> list[tuple[str, str]]:
+    text = source.text
+    if len(text) > max_chars:
+        logger.warning(
+            f"{source.url}: {len(text):,} chars, distilling the first {max_chars:,}"
+        )
+        text = (
+            text[:max_chars]
+            + "\n[... the source continues; only this first part was sent]"
+        )
     # A source containing "</source>" must not be able to close our tag early.
-    text = source.text.replace("</source>", "</ source>")
+    text = text.replace("</source>", "</ source>")
     return [
         ("system", distill_prompt.PROMPT),
         (
@@ -52,8 +61,10 @@ def keep_real_quotes(quotes: list[str], source_text: str) -> list[str]:
     return [q for q in quotes if _squash(q.strip(' "“”')) in haystack]
 
 
-async def distill(model: Runnable, source: ExtractedSource) -> Distillation:
-    result = await model.ainvoke(build_messages(source))
+async def distill(
+    model: Runnable, source: ExtractedSource, *, max_chars: int
+) -> Distillation:
+    result = await model.ainvoke(build_messages(source, max_chars=max_chars))
     raw: AIMessage = result["raw"]
     stop_reason = raw.response_metadata.get("stop_reason")
     logger.info(
