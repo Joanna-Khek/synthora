@@ -40,6 +40,14 @@ flowchart LR
     E --> F["🧠 Obsidian<br/>vault"]
 ```
 
+## Demo
+
+| 💬 Send a link, get a TL;DR | 🧠 It connects itself to your knowledge graph |
+|:-:|:-:|
+| The bot reads the link and replies with the key idea in under a minute | Each link joins the existing topics it relates to, or starts new ones, so related ideas cluster together in Obsidian |
+| <video src="assets/telegram_demo.mp4" controls muted width="100%"></video> | <video src="assets/obsidian_demo.mp4" controls muted width="100%"></video> |
+| [▶ telegram_demo.mp4](assets/telegram_demo.mp4) | [▶ obsidian_demo.mp4](assets/obsidian_demo.mp4) |
+
 ## Architecture
 
 Everything runs on **one always-on Fly.io machine**. The vault lives on the server as plain files and syncs to your devices through **Obsidian Headless** (`ob sync`), so your laptop can stay offline ([ADR 0008](docs/adr/0008-server-side-vault-with-obsidian-headless.md)).
