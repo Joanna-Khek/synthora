@@ -57,6 +57,7 @@ class LiveTools:
         self.picker_model = picker_model  # Claude, for picking links
         self.max_linked = limits.max_linked
         self.max_concurrent = limits.max_concurrent
+        self.max_source_chars = limits.max_source_chars
 
     @mlflow.trace(span_type="TOOL")
     async def read(self, url: str, source_type: SourceType) -> ExtractedSource:
@@ -69,7 +70,9 @@ class LiveTools:
     @mlflow.trace(span_type="CHAIN")
     async def distill(self, source: ExtractedSource) -> Distillation:
         tracing.link_prompt("distill")  # name must match filename in /prompts
-        return await distiller.distill(self.distill_model, source)
+        return await distiller.distill(
+            self.distill_model, source, max_chars=self.max_source_chars
+        )
 
     @mlflow.trace(span_type="CHAIN")
     async def pick_links(self, post: ExtractedSource) -> LinkSelection:
