@@ -1,8 +1,10 @@
+import os
 import subprocess
+import time
 
 import pytest
 
-from synthora.obsidian.vault import ObsidianError, Vault
+from synthora.obsidian.vault import DEFERRED, NoteBusy, ObsidianError, Vault
 from synthora.obsidian.sections import MyNotesViolation, replace_section
 
 NOTE = "## Synthesis\nold\n\n## My Notes\nmine\n"
@@ -174,10 +176,12 @@ def test_property_set_failure_is_detected(monkeypatch, tmp_path):
         Vault("test", tmp_path).set_property("Sources/a.md", "type", "source")
 
 
+# The edit tests below write a file and edit it at once. They test other rules
+# (My Notes, a change mid-edit), so they switch the FR-25 busy window off.
 def test_edit_writes_a_safe_change(monkeypatch, tmp_path):
     fake_cli(monkeypatch, tmp_path, {})
     (tmp_path / "n.md").write_text(NOTE, encoding="utf-8")
-    Vault("test", tmp_path).edit(
+    Vault("test", tmp_path, busy_seconds=0).edit(
         "n.md", lambda t: replace_section(t, "## Synthesis", "new")
     )
     assert (tmp_path / "n.md").read_text(
@@ -189,7 +193,9 @@ def test_edit_refuses_to_touch_my_notes(monkeypatch, tmp_path):
     fake_cli(monkeypatch, tmp_path, {})
     (tmp_path / "n.md").write_text(NOTE, encoding="utf-8")
     with pytest.raises(MyNotesViolation):
-        Vault("test", tmp_path).edit("n.md", lambda t: t + "agent scribble\n")
+        Vault("test", tmp_path, busy_seconds=0).edit(
+            "n.md", lambda t: t + "agent scribble\n"
+        )
     assert (tmp_path / "n.md").read_text(encoding="utf-8") == NOTE  # nothing written
 
 
@@ -203,5 +209,105 @@ def test_edit_refuses_if_the_note_changed_meanwhile(monkeypatch, tmp_path):
         return replace_section(text, "## Synthesis", "new")
 
     with pytest.raises(ObsidianError, match="changed"):
-        Vault("test", tmp_path).edit("n.md", you_type_while_the_agent_works)
+        Vault("test", tmp_path, busy_seconds=0).edit(
+            "n.md", you_type_while_the_agent_works
+        )
     assert "your edit" in path.read_text(encoding="utf-8")  # your edit survived
+
+
+def test_list_notes_reads_only_md_files_in_that_folder(monkeypatch, tmp_path):
+    fake_cli(monkeypatch, tmp_path, {})
+    (tmp_path / "Concepts" / "sub").mkdir(parents=True)
+    (tmp_path / "Concepts" / "A.md").write_text("x")
+    (tmp_path / "Concepts" / "b.txt").write_text("x")
+    (tmp_path / "Concepts" / "sub" / "C.md").write_text("x")
+    vault = Vault("test", tmp_path)
+    assert vault.list_notes("Concepts") == ["Concepts/A.md"]
+    assert vault.list_notes("Entities") == []
+    with pytest.raises(ObsidianError, match="outside the vault"):
+        vault.list_notes("../x")
+
+
+# ---------------------------------------------------------------- FR-25 write conflicts
+TABS = "[markdown] Vector Database\n[file-explorer] Files\n[search] Search\n"
+
+
+def _note(tmp_path, rel="Concepts/Vector Database.md", age_s=600):
+    """A Node on disk whose last change was `age_s` seconds ago."""
+    target = tmp_path / rel
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("## Synthesis\nOld.\n\n## My Notes\n", encoding="utf-8")
+    then = time.time() - age_s
+    os.utime(target, (then, then))  # set the file's modification time
+    return target
+
+
+def test_open_note_names_reads_only_markdown_tabs(monkeypatch, tmp_path):
+    fake_cli(monkeypatch, tmp_path, {"tabs": TABS})
+    assert Vault("test", tmp_path).open_note_names() == {"Vector Database"}
+
+
+def test_a_note_open_in_obsidian_is_deferred_and_untouched(monkeypatch, tmp_path):
+    fake_cli(monkeypatch, tmp_path, {"tabs": TABS})
+    target = _note(tmp_path)
+    before = target.read_text(encoding="utf-8")
+    with pytest.raises(NoteBusy, match="open in Obsidian") as e:
+        Vault("test", tmp_path).edit("Concepts/Vector Database.md", lambda t: t + "x")
+    assert str(e.value).startswith(DEFERRED)
+    assert target.read_text(encoding="utf-8") == before
+
+
+def test_a_note_changed_moments_ago_is_deferred(monkeypatch, tmp_path):
+    fake_cli(monkeypatch, tmp_path, {})
+    _note(tmp_path, "Concepts/Embedding.md", age_s=5)
+    with pytest.raises(NoteBusy, match="changed 5s ago"):
+        Vault("test", tmp_path).edit("Concepts/Embedding.md", lambda t: t + "x")
+
+
+def test_a_quiet_closed_note_is_edited(monkeypatch, tmp_path):
+    fake_cli(
+        monkeypatch, tmp_path, {"tabs": TABS}
+    )  # Vector Database is open, Embedding isn't
+    target = _note(tmp_path, "Concepts/Embedding.md", age_s=600)
+    Vault("test", tmp_path).edit(
+        "Concepts/Embedding.md", lambda t: t.replace("Old.", "New.")
+    )
+    assert "New." in target.read_text(encoding="utf-8")
+
+
+def test_our_own_recent_write_is_not_mistaken_for_yours(monkeypatch, tmp_path):
+    """Phase 1 creates a note, phase 2 edits it seconds later: that must not be deferred."""
+    fake_cli(monkeypatch, tmp_path, {})
+    _note(tmp_path, "Concepts/Embedding.md", age_s=600)
+    vault = Vault("test", tmp_path)
+    vault.edit("Concepts/Embedding.md", lambda t: t.replace("Old.", "Step 1."))
+    vault.edit(
+        "Concepts/Embedding.md", lambda t: t.replace("Step 1.", "Step 2.")
+    )  # 0s later
+    assert "Step 2." in (tmp_path / "Concepts/Embedding.md").read_text(encoding="utf-8")
+
+
+def test_your_change_after_ours_makes_it_busy_again(monkeypatch, tmp_path):
+    fake_cli(monkeypatch, tmp_path, {})
+    target = _note(tmp_path, "Concepts/Embedding.md", age_s=600)
+    vault = Vault("test", tmp_path)
+    vault.edit("Concepts/Embedding.md", lambda t: t.replace("Old.", "Ours."))
+    time.sleep(0.02)  # so your save gets a different timestamp from ours
+    target.write_text(
+        target.read_text(encoding="utf-8") + "you typed\n", encoding="utf-8"
+    )
+    with pytest.raises(NoteBusy, match="changed"):
+        vault.edit("Concepts/Embedding.md", lambda t: t)
+
+
+def test_a_new_note_created_by_us_can_be_edited_at_once(monkeypatch, tmp_path):
+    fake_cli(monkeypatch, tmp_path, {})
+    vault = Vault("test", tmp_path)
+    vault.create(
+        "Concepts/Big.md", "## Synthesis\n" + "x" * 5000 + "\n\n## My Notes\n"
+    )  # direct write
+    vault.edit(
+        "Concepts/Big.md",
+        lambda t: t.replace("## Synthesis\n", "## Synthesis\nLinked. "),
+    )
+    assert "Linked." in (tmp_path / "Concepts/Big.md").read_text(encoding="utf-8")
