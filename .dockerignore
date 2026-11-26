@@ -1,0 +1,24 @@
+# secrets: injected at runtime, never baked into an image
+.env
+.env.*
+
+# built on Windows; the container needs Linux builds of these
+.venv/
+node_modules/
+
+# state lives on the volume, not in the image
+data/
+mlflow.db
+mlruns/
+mlartifacts/
+outputs/
+
+# not needed to run the bot
+.git/
+**/__pycache__/
+.pytest_cache/
+.ruff_cache/
+tests/
+docs/
+scripts/
+test.ipynb
