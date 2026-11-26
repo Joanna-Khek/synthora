@@ -1,3 +1,4 @@
+from zoneinfo import ZoneInfo
 from typing import Literal
 from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
@@ -33,6 +34,7 @@ class CaptureConfig(BaseModel):
 
     max_linked: int = Field(gt=0)
     max_concurrent: int = Field(gt=0)
+    max_source_chars: int = Field(gt=0)
 
 
 class ExtractionConfig(BaseModel):
@@ -51,6 +53,26 @@ class TracingConfig(BaseModel):
     enabled: bool = True
     tracking_uri: str
     experiment: str
+
+
+class PullApiConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    url: str  # where the laptop runner pulls from, e.g. https://synthora-bot.fly.dev
+
+
+class VaultConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    name: str  # the vault name Obsidian shows
+    path: Path  # checked against the CLI at startup
+    busy_seconds: float = Field(
+        gt=0
+    )  # FR-25: a note changed this recently may be in use
+    git_commits: bool  # FR-20: commit after each Capture, so `git revert` undoes one
+    backend: Literal["cli", "files"] = (
+        "cli"  # files: no Obsidian app needed (the server)
+    )
 
 
 class Settings(BaseSettings):
@@ -72,6 +94,11 @@ class Settings(BaseSettings):
     github_token: SecretStr | None = (
         None  # without token is 60req/hr. with token is 5000req/hr
     )
+    pull_api_token: SecretStr | None = None  # 8.4: the laptop's key to the pull API
+    pull_api: PullApiConfig | None = (
+        None  # set: pull from the server; unset: read the local DB
+    )
+    timezone: ZoneInfo = ZoneInfo("UTC")
 
     # From .yaml
     llm: LLMConfig
@@ -80,6 +107,7 @@ class Settings(BaseSettings):
     extraction: ExtractionConfig
     storage: StorageConfig
     tracing: TracingConfig
+    vault: VaultConfig | None = None
 
     @classmethod
     def settings_customise_sources(
