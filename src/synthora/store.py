@@ -1,7 +1,16 @@
 import sqlite3
+from collections.abc import Sequence
 from pathlib import Path
+from typing import NamedTuple
+from datetime import datetime, tzinfo
 
-from synthora.domain import Capture
+from synthora.domain import Capture, Distillation
+
+
+def local_time(timestamp: str, tz: tzinfo) -> datetime:
+    """A stored timestamp (UTC text, see _NOW) as a time in `tz`."""
+    return datetime.fromisoformat(timestamp).astimezone(tz)
+
 
 # ISO-8601 UTC with milliseconds; SQLite has no datetime type, so we store text.
 _NOW = "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))"
@@ -42,8 +51,22 @@ CREATE INDEX ix_captures_status ON captures(status);
 CREATE INDEX ix_failures_capture ON failures(capture_id);
 """
 
+# 11.0: what the laptop needs to write a complete Source Note without re-reading the
+# page. Old rows keep NULL here: they were queued before v2.
+_V2 = """
+ALTER TABLE captures ADD COLUMN title TEXT;
+ALTER TABLE captures ADD COLUMN distillation TEXT   -- the whole Distillation, as JSON
+    CHECK (distillation IS NULL OR json_valid(distillation));
+"""
+
+# 11.1: a Source read from a link inside a post gets its own row, pointing at the post.
+_V3 = """
+ALTER TABLE captures ADD COLUMN parent_id INTEGER REFERENCES captures(id) ON DELETE CASCADE;
+CREATE INDEX ix_captures_parent ON captures(parent_id);
+"""
+
 # Append new scripts here; never edit one that has already run on a real database.
-MIGRATIONS: list[str] = [_V1]
+MIGRATIONS: list[str] = [_V1, _V2, _V3]
 
 
 def connect(path: Path | str) -> sqlite3.Connection:
@@ -99,24 +122,70 @@ def add_capture(
     return cur.lastrowid
 
 
+class LinkedQueued(NamedTuple):
+    """A Source read from a link inside a post, ready for the Vault."""
+
+    url: str
+    source_type: str
+    title: str | None
+    distillation: Distillation
+    full_text: str
+
+
 def mark_queued(
     conn: sqlite3.Connection,
     capture_id: int,
     *,
     source_type: str,
-    tldr: str,
+    title: str | None,
+    distillation: Distillation,
     full_text: str,
+    linked: Sequence[LinkedQueued] = (),
 ) -> bool:
-    """The graph succeeded: keep the result and wait for the laptop to pull it."""
+    """The graph succeeded: keep the result and wait for the laptop to pull it.
+
+    Each linked Source becomes its own queued row pointing at this one, in the
+    same transaction: the post and its links are queued together, or not at all.
+    A link that was already captured successfully is skipped (FR-23).
+    """
     with conn:
         cur = conn.execute(
             f"""UPDATE captures
-                SET status = 'queued', source_type = ?, tldr = ?, full_text = ?,
-                    updated_at = {_NOW}
+                SET status = 'queued', source_type = ?, title = ?, tldr = ?,
+                    distillation = ?, full_text = ?, updated_at = {_NOW}
                 WHERE id = ? AND status = 'processing'""",
-            (source_type, tldr, full_text, capture_id),
+            (
+                source_type,
+                title,
+                distillation.tldr,
+                distillation.model_dump_json(),
+                full_text,
+                capture_id,
+            ),
         )
-    return cur.rowcount == 1
+        if cur.rowcount != 1:
+            return False
+        for item in linked:
+            if find_successful(conn, item.url):
+                continue  # already in the queue or the Vault
+            conn.execute(
+                """INSERT INTO captures
+                       (kind, value, source_type, status, title, tldr, distillation,
+                        full_text, chat_id, user_message_id, reply_message_id, parent_id)
+                   SELECT 'url', ?, ?, 'queued', ?, ?, ?, ?,
+                          chat_id, user_message_id, NULL, id
+                   FROM captures WHERE id = ?""",
+                (
+                    item.url,
+                    item.source_type,
+                    item.title,
+                    item.distillation.tldr,
+                    item.distillation.model_dump_json(),
+                    item.full_text,
+                    capture_id,
+                ),
+            )
+    return True
 
 
 def mark_failed(
@@ -186,7 +255,11 @@ def find_failed_by_reply(
 
 
 def complete_failed(
-    conn: sqlite3.Connection, capture_id: int, *, tldr: str, full_text: str
+    conn: sqlite3.Connection,
+    capture_id: int,
+    *,
+    distillation: Distillation,
+    full_text: str,
 ) -> bool:
     """FR-22: failed → queued, using text the user supplied.
 
@@ -195,9 +268,10 @@ def complete_failed(
     with conn:
         cur = conn.execute(
             f"""UPDATE captures
-                SET status = 'queued', tldr = ?, full_text = ?, updated_at = {_NOW}
+                SET status = 'queued', tldr = ?, distillation = ?, full_text = ?,
+                    updated_at = {_NOW}
                 WHERE id = ? AND status = 'failed'""",
-            (tldr, full_text, capture_id),
+            (distillation.tldr, distillation.model_dump_json(), full_text, capture_id),
         )
         if cur.rowcount == 0:
             return False
@@ -208,7 +282,32 @@ def complete_failed(
     return True
 
 
+def stored_distillation(row: sqlite3.Row) -> Distillation | None:
+    """The Distillation saved with a Capture; None for one queued before migration v2."""
+    raw = row["distillation"]
+    return None if raw is None else Distillation.model_validate_json(raw)
+
+
 PENDING = ("queued", "pulled")  # captured, but not yet written to the Vault
+
+
+def ready_for_vault(conn: sqlite3.Connection, limit: int = 50) -> list[sqlite3.Row]:
+    """11.1: what the laptop should write next, oldest first, with each link's post title.
+
+    Includes 'pulled' rows: a run that crashed or was deferred (FR-25) didn't ack,
+    so its items come back (at-least-once delivery). A linked Source waits until
+    its post is written, so `saved_via: [[the post]]` always resolves.
+    """
+    return conn.execute(
+        f"""SELECT c.*, p.title AS parent_title
+            FROM captures AS c
+            LEFT JOIN captures AS p ON p.id = c.parent_id
+            WHERE c.status IN {PENDING}
+              AND (c.parent_id IS NULL OR p.status = 'written')
+            ORDER BY c.id
+            LIMIT ?""",
+        (limit,),
+    ).fetchall()
 
 
 def count_by_status(conn: sqlite3.Connection) -> dict[str, int]:
