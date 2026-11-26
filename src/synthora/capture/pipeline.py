@@ -15,7 +15,7 @@ from pydantic import BaseModel, ConfigDict
 from synthora import store
 from synthora.capture.distiller import DistillError
 from synthora.capture.graph import build_capture_graph
-from synthora.capture.state import CaptureState, LinkedSource
+from synthora.capture.state import CaptureState, LinkedSource, LinkedDistilled
 from synthora.capture.tools import CaptureContext, Tools
 from synthora.domain import Capture, Distillation, ExtractedSource, SourceType
 
@@ -157,8 +157,22 @@ class CapturePipeline:
                 self._db,
                 capture_id,
                 source_type=state["source_type"],
-                tldr=outcome.distillation.tldr,
+                title=outcome.source.title,
+                distillation=outcome.distillation,
                 full_text=outcome.source.text,
+                linked=[
+                    store.LinkedQueued(
+                        url=item.url,
+                        source_type=item.source_type,
+                        title=item.source.title,
+                        distillation=item.distillation,
+                        full_text=item.source.text,
+                    )
+                    for item in outcome.linked
+                    if isinstance(
+                        item, LinkedDistilled
+                    )  # a failed link stays in the reply only
+                ],
             )
         return outcome
 
@@ -171,7 +185,7 @@ class CapturePipeline:
             return Failed(reason=f"couldn't distill it: {e}")
 
         if not store.complete_failed(
-            self._db, failed["id"], tldr=distillation.tldr, full_text=text
+            self._db, failed["id"], distillation=distillation, full_text=text
         ):
             return Failed(reason="it was already completed")
         return Succeeded(source=source, distillation=distillation)
