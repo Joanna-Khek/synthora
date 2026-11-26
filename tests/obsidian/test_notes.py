@@ -10,6 +10,9 @@ from synthora.obsidian.notes import (
     NodeNote,
     SourceNote,
     safe_note_name,
+    name_key,
+    split_frontmatter,
+    join_frontmatter,
 )
 from synthora.domain import SourceType
 
@@ -132,3 +135,72 @@ def test_node_note_with_evidence():
         "⚠️ **Contradicts earlier evidence.** Mentions RAG in passing."
     ) in body
     assert body.rstrip().endswith(MY_NOTES)
+
+
+@pytest.mark.parametrize(
+    ("a", "b"),
+    [
+        ("Embeddings", "Embedding"),
+        ("embedding", "Embedding"),
+        ("Retrieval-Augmented Generation", "retrieval augmented generation"),
+        ("Retrieval_Augmented  Generation", "Retrieval-Augmented Generation"),
+        ("Approximate Nearest Neighbour Search", "Approximate Nearest Neighbor Search"),
+        ("LLMs", "LLM"),
+        ("Vector Databases", "Vector Database"),
+        ("Search Queries", "Search Query"),
+        ("Tokenisation", "Tokenization"),
+        ("Tokenization", "tokenisation"),
+        ("Bayes' Theorem", "Bayes Theorem"),
+    ],
+)
+def test_same_node_same_key(a, b):
+    assert name_key(a) == name_key(b)
+
+
+@pytest.mark.parametrize(
+    ("a", "b"),
+    [
+        (
+            "Vector DB",
+            "Vector Database",
+        ),  # an abbreviation: the agent's call, via aliases
+        ("Attention", "Self-Attention"),
+        ("GPT-4", "GPT-4o"),
+        ("Claude 3", "Claude 4"),
+    ],
+)
+def test_different_names_keep_different_keys(a, b):
+    assert name_key(a) != name_key(b)
+
+
+@pytest.mark.parametrize("word", ["Analysis", "Class", "Corpus", "Hour"])
+def test_words_that_only_look_plural_or_british_are_left_alone(word):
+    assert name_key(word) == word.casefold()
+
+
+def test_keys_only_need_to_match_each_other_not_look_right():
+    # 'bias' -> 'bia' is fine: a key is compared, never shown. Excluding '-as'
+    # would break 'Ideas' -> 'Idea'. What matters is that no OTHER name collides.
+    assert name_key("Bias") == name_key("bias")
+    assert name_key("Ideas") == name_key("Idea")
+
+
+def test_frontmatter_round_trip_keeps_properties_and_body():
+    text = NodeNote(
+        title="Alpha",
+        type="concept",
+        synthesis="S.",
+        aliases=["A"],
+        relations={"uses": ["Beta"]},
+    ).render()
+    props, body = split_frontmatter(text)
+    assert props["uses"] == ["[[Beta]]"] and props["aliases"] == ["A"]
+    assert join_frontmatter(props, body) == text
+
+
+@pytest.mark.parametrize(
+    "text", ["no frontmatter", "---\nnever closed", "---\n- a list\n---\nbody"]
+)
+def test_split_frontmatter_rejects_malformed_notes(text):
+    with pytest.raises(ValueError):
+        split_frontmatter(text)
