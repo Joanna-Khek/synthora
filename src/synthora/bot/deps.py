@@ -5,6 +5,7 @@ import sqlite3
 from langchain_anthropic import ChatAnthropic
 from pydantic import BaseModel, ConfigDict
 from telegram.ext import ContextTypes
+from datetime import tzinfo
 
 from synthora import store
 from synthora.bot.parsed_message import ParsedMessage
@@ -28,6 +29,7 @@ class BotDeps(BaseModel):
     # Photo albums still arriving, by media_group_id. The dict itself is
     # mutable state; frozen only stops it being replaced.
     albums: dict[str, list[ParsedMessage]] = {}
+    timezone: tzinfo  # for showing times in /status
 
 
 def get_deps(context: ContextTypes.DEFAULT_TYPE) -> BotDeps:
@@ -40,6 +42,7 @@ async def open_deps(
     llm: LLMConfig,
     storage: StorageConfig,
     capture: CaptureConfig,
+    timezone: tzinfo,  # for showing times in /status
 ) -> BotDeps:
     """Start the Extraction Server, open the database and build the pipeline."""
     path = ROOT / storage.db_path
@@ -48,7 +51,9 @@ async def open_deps(
     extraction = ExtractionClient()
     await extraction.start()  # launches the Extraction Server as a child process
 
-    picker_chat = ChatAnthropic(model=llm.model, api_key=llm_api_key, max_tokens=1024)  # pyright: ignore[reportCallIssue]
+    picker_chat = ChatAnthropic(
+        model=llm.model, api_key=llm_api_key, max_tokens=llm.max_tokens
+    )  # pyright: ignore[reportCallIssue]
     tools = LiveTools(
         extraction=extraction,
         distill_model=make_distill_model(llm_api_key, llm),
@@ -61,6 +66,7 @@ async def open_deps(
         db=db,
         extraction=extraction,
         pipeline=CapturePipeline(db, tools),
+        timezone=timezone,
     )
 
 
