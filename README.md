@@ -42,11 +42,17 @@ flowchart LR
 
 ## Demo
 
-| 💬 Send a link, get a TL;DR | 🧠 It connects itself to your knowledge graph |
-|:-:|:-:|
-| The bot reads the link and replies with the key idea in under a minute | Each link joins the existing topics it relates to, or starts new ones, so related ideas cluster together in Obsidian |
-| <video src="assets/telegram_demo.mp4" controls muted width="100%"></video> | <video src="assets/obsidian_demo.mp4" controls muted width="100%"></video> |
-| [▶ telegram_demo.mp4](assets/telegram_demo.mp4) | [▶ obsidian_demo.mp4](assets/obsidian_demo.mp4) |
+### 💬 Send a link, get a TL;DR
+
+The bot reads the link and replies with the key idea in under a minute.
+
+https://github.com/user-attachments/assets/5369af68-4468-4009-8085-2d99ee9f2a43
+
+### 🧠 It connects itself to your knowledge graph
+
+Each link joins the existing topics it relates to, or starts new ones, so related ideas cluster together in Obsidian.
+
+https://github.com/user-attachments/assets/1dfc852c-9467-4e33-b89d-73ecfe2eac56
 
 ## Architecture
 
