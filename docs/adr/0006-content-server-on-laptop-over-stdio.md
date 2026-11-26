@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: partly superseded by 0008 (the Content Server now runs on the server, not the laptop; its stdio transport, tools and guards are unchanged)
 ---
 
 # Content Server on the laptop over stdio, with guarded write tools

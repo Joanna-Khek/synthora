@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded by 0008 (the Cartographer runs on the server and writes vault files; Obsidian Headless syncs them, so no laptop is needed)
 ---
 
 # Always-on bot server with laptop-side Obsidian CLI

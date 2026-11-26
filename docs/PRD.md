@@ -1,8 +1,8 @@
 # Synthora — Project Requirements Document
 
-**Status:** Draft v0.5 · **Date:** 2026-11-18 · **Owner:** Joanna Khek Cuina
+**Status:** Draft v0.6 · **Date:** 2026-11-26 · **Owner:** Joanna Khek Cuina
 
-Related: [CONTEXT.md](../CONTEXT.md) (glossary — terms in **bold** below are defined there) · [ADR 0001](adr/0001-always-on-bot-with-laptop-side-obsidian-cli.md) · [ADR 0004](adr/0004-rule-based-reader.md) (supersedes [ADR 0002](adr/0002-reader-agent-over-extraction-mcp-server.md))
+Related: [CONTEXT.md](../CONTEXT.md) (glossary — terms in **bold** below are defined there) · [ADR 0004](adr/0004-rule-based-reader.md) (supersedes [ADR 0002](adr/0002-reader-agent-over-extraction-mcp-server.md)) · [ADR 0007](adr/0007-host-the-server-on-fly-io.md) · [ADR 0008](adr/0008-server-side-vault-with-obsidian-headless.md) (supersedes [ADR 0001](adr/0001-always-on-bot-with-laptop-side-obsidian-cli.md))
 
 ---
 
@@ -98,7 +98,7 @@ See ADR 0004.
 - FR-18. Agents never modify any **My Notes** section.
 
 ### 4.5 Vault writes
-- FR-19. Vault search, reads, property updates and links/backlinks queries go through the official Obsidian CLI. Note bodies that are large (over ~4 KB) or contain backslashes are written directly to the file, because the CLI's `content=` argument mangles them. The output of every CLI call is checked for errors, because the CLI exits 0 even on failure.
+- FR-19. On the server (ADR 0008), the Vault is a folder of plain files (`backend: files`): search, reads, property updates and backlinks are done by reading the Markdown directly, and Obsidian Headless (`ob sync`) syncs the folder with Obsidian Sync. The `cli` backend (a laptop with the Obsidian app open) remains as a fallback; there, vault search, reads, property updates and links/backlinks queries go through the official Obsidian CLI. Note bodies that are large (over ~4 KB) or contain backslashes are written directly to the file, because the CLI's `content=` argument mangles them. The output of every CLI call is checked for errors, because the CLI exits 0 even on failure.
 - FR-19a. All notes follow Obsidian Flavored Markdown. The Cartographer's system prompt includes the `obsidian-markdown` skill from [obsidianmd/obsidian-skills](https://github.com/obsidianmd/obsidian-skills) (MIT), vendored into this repo under `skills/obsidian/` and pinned to a specific commit, as the reference for the text it writes (Synthesis and Evidence); the prompt states which parts don't apply, because the tools own frontmatter, headings and sections. The `obsidian-cli` skill is vendored but not included: the agent never runs the CLI, the Content Server's tools do (ADR 0006). Every `[[link]]` in agent-written text is resolved to a Node's canonical title, or refused, in code (FR-14).
 - FR-19b. Relation properties are YAML lists of quoted wikilinks (e.g. `uses: ["[[vLLM]]"]`); an unquoted `[[...]]` is parsed as a nested YAML list, not a link.
 - FR-20. When `vault.git_commits` is on, the Vault is committed to git after each Capture is fully written, with a message referencing the Source, so `git revert` undoes exactly one Capture. It is opt-in: with it off (the current setting), nothing is committed and there is no per-Capture undo; Obsidian's File recovery snapshots remain, and the write rules still hold (My Notes untouched, no overwrites or deletes, Evidence append-only).
@@ -115,7 +115,7 @@ See ADR 0004.
 - FR-25. If a Node the Cartographer needs to write is being edited in Obsidian at that moment, the write is deferred and retried later; the Capture stays queued until it succeeds.
 
 ### 4.9 Observability
-- FR-26. Every LangGraph run (server and laptop) is traced in MLflow: agent inputs/outputs, tool calls, which extractor the Reader used and why it failed, Content Server tool calls, and Cartographer decisions.
+- FR-26. Every LangGraph run (capture graph and runner) is traced in MLflow: agent inputs/outputs, tool calls, which extractor the Reader used and why it failed, Content Server tool calls, and Cartographer decisions.
 
 ### 4.10 Content Server
 - FR-27. The **Content Server** is an MCP server (official `mcp` SDK) of shared tools that Synthora's content agents call while crafting knowledge content: the Distiller, the Cartographer, and new agents still to be defined (§9.11). Each agent connects as an MCP client (e.g. via `langchain-mcp-adapters`), so a tool is written once and every agent gets the same behaviour.
@@ -180,24 +180,26 @@ contrasts_with:
 
 ## 6. System architecture
 
-See ADR 0001 and ADR 0004 for rationale.
+See ADR 0004, ADR 0007 and ADR 0008 for rationale.
 
 ```
-Phone ──Capture──▶ ┌────────── Server (always on: Hetzner / Fly.io) ──────────┐
-                   │ Telegram bot (owner-only)                                │
-                   │ LangGraph "server graph":                                │
-                   │   Source Type (rules) → Reader ─MCP─▶ Extraction Server   │
-                   │   → Distiller → send TL;DR                               │
-Phone ◀──TL;DR──── │   → enqueue result (SQLite; full text retained)          │
-                   │ HTTPS pull API (authenticated)                           │
-                   └───────────────────────────┬──────────────────────────────┘
-                                               │ laptop pulls when online
-                   ┌───────────────────────────▼──────────────────────────────┐
-                   │ Laptop (Windows side, auto-starts at login)              │
-                   │ LangGraph "laptop graph":                                │
-                   │   Cartographer ⇄ Obsidian CLI tools → git commit → ack   │
-                   │ Requires Obsidian desktop app running                    │
-                   └──────────────────────────────────────────────────────────┘
+Phone ──Capture──▶ ┌──────── Server (always on: Fly.io, 1 machine, 2 GB) ────────┐
+                   │ Telegram bot (owner-only)                                  │
+                   │ LangGraph "capture graph":                                 │
+                   │   Source Type (rules) → Reader ─MCP─▶ Extraction Server     │
+                   │   → Distiller → send TL;DR                                 │
+Phone ◀──TL;DR──── │   → enqueue result (SQLite; full text retained)            │
+                   │                                                            │
+                   │ Runner (every 60 s), LangGraph:                            │
+                   │   Cartographer ⇄ Content Server (MCP) → Vault files         │
+                   │                                                            │
+                   │ Obsidian Headless: ob sync --continuous                    │
+                   └─────────────────────────────┬──────────────────────────────┘
+                                                 │ Obsidian Sync (both ways)
+                                   ┌─────────────▼─────────────┐
+                                   │ Obsidian on laptop, phone │
+                                   │ (no device needs to be on)│
+                                   └───────────────────────────┘
 ```
 
 | Component | Choice |
@@ -207,13 +209,13 @@ Phone ◀──TL;DR──── │   → enqueue result (SQLite; full text ret
 | LLMs | Claude Sonnet 5.5 (Distiller, Cartographer, image reading); Claude Haiku (cleanup). Called through LangChain (`langchain-anthropic` `ChatAnthropic`); structured output via `with_structured_output(..., method="json_schema")`, because forced tool calls are rejected by current models |
 | Extraction | Plain async Python functions (`httpx`) wrapping trafilatura, Defuddle (Node.js CLI, so Node is needed on the server), og-meta parsing, the GitHub REST API (optional read-only token) and the YouTube Data API v3 (API key restricted to that API, sent in a header), hosted as tools on the Extraction Server: Python MCP server (official `mcp` SDK), launched by the bot over stdio, not exposed to the network. The Reader calls them with the SDK's MCP client |
 | Queue / storage | SQLite on the server with a persistent volume |
-| Content Server | MCP server (official `mcp` SDK) of shared tools for the Distiller, the Cartographer and new content agents; tool list, host and transport decided during build (§9.10, §9.12) |
-| Vault access | Official Obsidian CLI (v1.12.7+), invoked from the laptop process; direct file writes for large bodies (FR-19) |
+| Content Server | MCP server (official `mcp` SDK) of shared tools for the Cartographer and new content agents; launched by the runner over stdio on the server (ADR 0006, ADR 0008) |
+| Vault access | Plain Markdown files on the Fly volume (`FileVault`, `backend: files`), synced by Obsidian Headless (`obsidian-headless`, pinned in `package.json`). Fallback: the Obsidian CLI (v1.12.7+) from a laptop runner (FR-19) |
 | Obsidian conventions | [obsidian-skills](https://github.com/obsidianmd/obsidian-skills) (`obsidian-markdown`, `obsidian-cli`) vendored under `skills/obsidian/`, pinned to a commit, loaded into the Cartographer's system prompt |
-| Hosting | Hetzner Cloud smallest VPS (~€4–5/mo) or Fly.io (~$2–5/mo) |
-| Vault versioning | git repo, commit per Capture |
-| Laptop runtime | Native Windows Python (not WSL), auto-started at login |
-| Tracing | MLflow (LangGraph tracing for both graphs); tracking server on the VPS behind auth |
+| Hosting | Fly.io, one shared-cpu-1x machine with 2 GB, `sin` region, one Docker image started by `start.sh` (ADR 0007, ADR 0008) |
+| Vault versioning | Obsidian Sync version history and Fly's daily volume snapshots; per-Capture git commits are opt-in and off (FR-20) |
+| Runner | `synthora-runner`, started every 60 s inside the container; reads the local SQLite queue. A laptop runner (native Windows, pull API) remains as a fallback |
+| Tracing | MLflow (LangGraph tracing for both graphs); tracking server in the same container, not exposed (only the pull API port is public) |
 
 ---
 
@@ -222,8 +224,8 @@ Phone ◀──TL;DR──── │   → enqueue result (SQLite; full text ret
 - NFR-1. **Reliability:** no Capture is silently lost. The server must be up continuously (Telegram discards undelivered updates after 24h).
 - NFR-2. **Latency:** TL;DR within ~60s of a Capture for typical articles.
 - NFR-3. **Security:** bot restricted to owner's user ID; laptop↔server pull API authenticated with a secret token over HTTPS; secrets kept out of the repo (including the YouTube API key, which is restricted to the YouTube Data API v3 in Google Cloud). All fetching (inside the Extraction Server) allows only `http`/`https` URLs and refuses private, loopback and link-local addresses (including after redirects), so a URL can't reach internal services such as MLflow. API keys are sent in headers, never in URLs, so they don't leak into error messages, logs or traces.
-- NFR-4. **Safety of the Vault:** every agent write is reversible via git; My Notes never touched.
-- NFR-5. **Cost:** target hosting ≤ $5/mo; LLM spend target to be confirmed (see §9).
+- NFR-4. **Safety of the Vault:** every agent write is reversible, through Obsidian Sync's version history (and git, when `vault.git_commits` is on); My Notes never touched.
+- NFR-5. **Cost:** the original hosting target was ≤ $5/mo. The 2 GB Fly machine and Obsidian Sync (ADR 0008) raise it, so the target is to be re-confirmed; LLM spend target to be confirmed (see §9).
 - NFR-6. **Compliance:** no logged-in scraping or ToS-violating access to LinkedIn.
 
 ---
@@ -239,13 +241,15 @@ Phone ◀──TL;DR──── │   → enqueue result (SQLite; full text ret
 ### Risks
 - LinkedIn returns authwall/preview only → more manual screenshots.
 - Cartographer produces duplicate or noisy Nodes → mitigated by search-before-create, Aliases, node cap, and the evaluation set.
-- Synthesis rewrites lose nuance → mitigated by append-only Evidence and git history.
-- Obsidian CLI is new (2026) and its interface may change.
+- Synthesis rewrites lose nuance → mitigated by append-only Evidence and Obsidian Sync's version history.
+- Obsidian Headless is young (0.0.x) and its interface may change → pinned in `package.json`; upgrade deliberately. (The Obsidian CLI, used only by the laptop fallback, is also new.)
+- On the server, `FileVault` reimplements search, aliases and backlinks by reading files → it must resolve links the way Obsidian does (FR-13, FR-14); covered by tests.
+- An edit still being typed on a device and not yet synced is invisible to the busy-note check (FR-25) → Obsidian Sync's conflict handling is the last line of defence.
 - Defuddle is a JavaScript library, so it is called as a subprocess (Node CLI) → adds Node to the server image; pin its version.
 - No fallback extractor: a page that its one extractor mangles or can't read becomes a Failed Capture → watch the Failed Capture rate per Source Type (`/status`, MLflow); add a fallback for a Source Type only if failures are frequent.
 - Prompt injection: a fetched page may contain text addressed to the Distiller or the Cartographer → mitigated by FR-4c (Source text is data, never instructions) and the SSRF guard in NFR-3.
 - obsidian-skills changes upstream → mitigated by vendoring and pinning a commit; update deliberately.
-- MLflow tracking server plus the bot may not fit in the smallest VPS's memory → check during setup; upgrade tier or use a lighter backend if needed.
+- MLflow, the bot, the runner and `ob sync` share one machine → it runs with 2 GB (ADR 0008); watch memory if more processes are added.
 
 ### Success criteria
 - An evaluation set of ~15 real saved links across all Source Types is processed end-to-end, and a manual review of the resulting graph finds no duplicate Concepts and sensible Relations.
@@ -263,9 +267,10 @@ Phone ◀──TL;DR──── │   → enqueue result (SQLite; full text ret
 - Multiple items per message → several Captures (FR-1).
 - Repeat detection → exact URL match only (FR-23).
 - Note being edited while the Cartographer writes → defer and retry later (FR-25).
-- Laptop process → native Windows.
-- Observability → MLflow (FR-26), tracking server hosted on the VPS behind authentication.
-- Hand-edited Synthesis → the Cartographer may overwrite it; prior versions remain in git history. Permanent edits belong in My Notes.
+- Where the Cartographer runs → on the server, writing vault files that Obsidian Headless syncs (ADR 0008, supersedes ADR 0001). The laptop runner (native Windows) remains as a fallback.
+- Hosting → Fly.io, one 2 GB machine (ADR 0007, ADR 0008).
+- Observability → MLflow (FR-26), tracking server in the same container, not exposed to the network.
+- Hand-edited Synthesis → the Cartographer may overwrite it; prior versions remain in Obsidian Sync's version history. Permanent edits belong in My Notes.
 
 ### Deferred
 - **LLM budget:** monthly spend cap and behaviour when reached.
@@ -274,14 +279,14 @@ Phone ◀──TL;DR──── │   → enqueue result (SQLite; full text ret
 ### Decide during build
 1. **TL;DR format:** length (1 line vs 3 bullets) and whether it names the Concepts it will link to.
 2. **Relation vocabulary growth:** can the list be extended, and by whom (you only, or agent-proposed)?
-3. ~~**Vault git remote**~~ → decided for now: local only, no git (`vault.git_commits: false`). Revisit when choosing Obsidian Sync, or if per-Capture undo becomes worth having. Original question: pushed to a private remote for backup/phone access, or local only?
+3. ~~**Vault git remote**~~ → decided for now: local only, no git (`vault.git_commits: false`). Obsidian Sync was then chosen (ADR 0008) and now provides backup and phone access, so git stays off unless per-Capture undo becomes worth having. Original question: pushed to a private remote for backup/phone access, or local only?
 4. **Data retention:** how long the server keeps full Source text and images.
 5. **Non-English Sources:** translate, or keep the original language?
 6. **Undo:** a way to delete a Capture and its Nodes from Telegram (e.g. `/undo`)?
 7. ~~**YouTube metadata method**~~ → resolved: YouTube Data API v3 (see Resolved).
-8. ~~**Edit detection (FR-25)**~~ → decided: a note is treated as in use if it is open in an Obsidian tab (CLI `tabs`; the CLI can't see unsaved typing, and only an open note can hold any) or its file changed within `vault.busy_seconds` (120 s; catches autosave and Sync), unless that change was Synthora's own write. `Vault.edit` raises `NoteBusy`; the run ends `deferred`, and the Capture stays queued and is retried, never forced.
-9. **Obsidian Headless:** obsidian-skills includes an `obsidian-headless` skill for syncing vaults without the desktop app. If it allows reliable server-side Vault writes, revisit ADR 0001's laptop split.
+8. ~~**Edit detection (FR-25)**~~ → decided: a note is treated as in use if it is open in an Obsidian tab (CLI `tabs`; the CLI can't see unsaved typing, and only an open note can hold any) or its file changed within `vault.busy_seconds` (120 s; catches autosave and Sync), unless that change was Synthora's own write. `Vault.edit` raises `NoteBusy`; the run ends `deferred`, and the Capture stays queued and is retried, never forced. On the server (`FileVault`) there are no tabs, so only the modification-time check applies (ADR 0008).
+9. ~~**Obsidian Headless**~~ → decided: the server owns the Vault as plain files and `ob sync --continuous` syncs it through Obsidian Sync (ADR 0008). Original question: obsidian-skills includes an `obsidian-headless` skill for syncing vaults without the desktop app. If it allows reliable server-side Vault writes, revisit ADR 0001's laptop split.
 10. ~~**Content Server tools**~~ → decided: read tools plus narrow, guarded write tools (ADR 0006). Original question: which tools it exposes. Candidates: get a Source's full text and metadata, search the Vault by title or Alias, read a Node, list backlinks, check the Relation vocabulary. Decide whether Vault-writing tools belong in it or stay with the Cartographer.
 11. **New content agents:** which agents join the Distiller and the Cartographer (e.g. a critic or fact-checker), what each one does, and where it runs. Add each to CONTEXT.md once defined.
-12. ~~**Content Server host and transport**~~ → decided: on the laptop, over stdio (ADR 0006). Original question: over stdio, the server runs on whichever machine launches it, so the VPS and the laptop could each start their own copy. But Vault tools only work on the laptop (ADR 0001) and SQLite tools only on the VPS. Options: one server per side with different tools, or one remote server over streamable HTTP with auth. Record the choice in an ADR.
+12. ~~**Content Server host and transport**~~ → decided: over stdio (ADR 0006), now on the server, launched by the runner (ADR 0008; ADR 0006 originally put it on the laptop). Original question: over stdio, the server runs on whichever machine launches it, so the VPS and the laptop could each start their own copy. But Vault tools only work on the laptop (ADR 0001) and SQLite tools only on the VPS. Options: one server per side with different tools, or one remote server over streamable HTTP with auth. Record the choice in an ADR.
 13. ~~**One MCP server or two**~~ → decided: two separate servers (ADR 0006). Original question: keep the Extraction Server and the Content Server separate (default: they may run on different machines), or merge them into one server.
