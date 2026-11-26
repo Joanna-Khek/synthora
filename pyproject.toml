@@ -11,6 +11,7 @@ dev = [
 
 [project]
 dependencies = [
+  "fastapi>=0.165.0",
   "httpx>=0.28.1",
   "langchain-anthropic>=1.7.10",
   "langgraph>=1.2.22",
@@ -20,7 +21,9 @@ dependencies = [
   "pydantic-settings>=2.16.3",
   "python-telegram-bot>=22.8",
   "pyyaml>=6.0.3",
-  "trafilatura>=2.3.1"
+  "trafilatura>=2.3.1",
+  "tzdata>=2026.6",
+  "uvicorn>=0.54.0"
 ]
 description = "Add your description here"
 name = "synthora"
@@ -29,7 +32,9 @@ requires-python = ">=3.13"
 version = "0.1.0"
 
 [project.scripts]
+synthora-api = "synthora.api.app:main"
 synthora-bot = "synthora.bot.app:main"
+synthora-runner = "synthora.runner.cli:main"
 
 [tool.pytest.ini_options]
 addopts = "-m 'not live and not obsidian'"
