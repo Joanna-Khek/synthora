@@ -6,7 +6,7 @@ contact Telegram.
 """
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from pathlib import Path
 
 import pytest
@@ -66,7 +66,10 @@ def test_gate_runs_before_every_handler():
         llm_api_key="fake-key",
         llm=LLMConfig(model="fake-model", max_tokens=1, effort="low"),
         storage=StorageConfig(db_path=Path("unused.db")),
-        capture=CaptureConfig(max_linked=25, max_concurrent=4),
+        capture=CaptureConfig(
+            max_linked=25, max_concurrent=4, max_source_chars=200_000
+        ),
+        timezone=UTC,
     )
 
     first_group = min(app.handlers)
