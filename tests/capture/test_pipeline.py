@@ -121,6 +121,21 @@ def test_linked_resources_and_notes_reach_the_outcome(db):
     assert "safety ceiling of 1" in outcome.notes[0]
 
 
+def test_each_distilled_link_is_queued_as_its_own_row(db):
+    outcome = run(db, FakeTools(picks=[1, 2]), value=POST_URL)
+    assert isinstance(outcome, Succeeded)
+    post = db.execute("SELECT id FROM captures WHERE parent_id IS NULL").fetchone()[
+        "id"
+    ]
+    children = db.execute(
+        "SELECT value, status, title FROM captures WHERE parent_id = ? ORDER BY id",
+        (post,),
+    ).fetchall()
+    distilled = [item.url for item in outcome.linked if hasattr(item, "distillation")]
+    assert [c["value"] for c in children] == distilled
+    assert all(c["status"] == "queued" and c["title"] for c in children)
+
+
 def test_progress_reports_each_step_then_the_counters(db):
     events = []
     run(db, FakeTools(picks=[1, 2]), value=POST_URL, events=events)
