@@ -1,3 +1,5 @@
+timezone: Asia/Singapore  # times are stored in UTC and shown in this zone
+
 llm:
   model: claude-haiku-5-5
   max_tokens: 16000
@@ -11,6 +13,7 @@ bot:
 capture:
   max_linked: 25            # safety ceiling on links followed from one LinkedIn post
   max_concurrent: 4         # links read or distilled at the same time
+  max_source_chars: 200000  # ≈50K tokens. keeps a Distiller request far below Haiku 5.5's 100K-token price step (5x)
 
 extraction:
   timeout_seconds: 20       # per HTTP request made by the Extraction Server
@@ -22,3 +25,9 @@ tracing:
   enabled: true
   tracking_uri: http://127.0.0.1:5000
   experiment: dev-synthora-server
+
+vault:
+  name: synthora
+  path: C:/Users/joann/Vaults/synthora-test
+  busy_seconds: 120         # FR-25: don't edit a note changed this recently (you may be typing)
+  git_commits: false        # FR-20: commit the Vault after each Capture (needs `git init` there)
