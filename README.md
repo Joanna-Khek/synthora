@@ -46,13 +46,13 @@ flowchart LR
 
 The bot reads the link and replies with the key idea in under a minute.
 
-https://github.com/user-attachments/assets/5369af68-4468-4009-8085-2d99ee9f2a43
+https://github.com/user-attachments/assets/1dfc852c-9467-4e33-b89d-73ecfe2eac56
 
 ### 🧠 It connects itself to your knowledge graph
 
 Each link joins the existing topics it relates to, or starts new ones, so related ideas cluster together in Obsidian.
 
-https://github.com/user-attachments/assets/1dfc852c-9467-4e33-b89d-73ecfe2eac56
+https://github.com/user-attachments/assets/5369af68-4468-4009-8085-2d99ee9f2a43
 
 ## Architecture
 
