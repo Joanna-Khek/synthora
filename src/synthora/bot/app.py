@@ -1,4 +1,5 @@
 import asyncio
+from datetime import tzinfo
 
 from loguru import logger
 from telegram import LinkPreviewOptions, Message, Update
@@ -139,7 +140,7 @@ def make_owner_gate(owner_id: int):
 
 async def show_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
-        status.build_status(get_deps(context).db),
+        status.build_status(get_deps(context).db, get_deps(context).timezone),
         link_preview_options=LinkPreviewOptions(is_disabled=True),
     )
 
@@ -152,14 +153,17 @@ def build_app(
     llm: LLMConfig,
     storage: StorageConfig,
     capture: CaptureConfig,
+    timezone: tzinfo,
 ) -> Application:
     async def post_init(app: Application) -> None:  # runs once, after the bot starts
         app.bot_data[DEPS_KEY] = await open_deps(
-            bot, llm_api_key, llm, storage, capture
+            bot, llm_api_key, llm, storage, capture, timezone=timezone
         )
 
     async def post_shutdown(app: Application) -> None:  # runs once, on Ctrl+C
-        await close_deps(app.bot_data[DEPS_KEY])
+        deps = app.bot_data.get(DEPS_KEY)
+        if deps is not None:  # None when post_init failed before storing them
+            await close_deps(deps)
 
     app = (
         Application.builder()
@@ -193,8 +197,9 @@ def main() -> None:
         llm=settings.llm,
         storage=settings.storage,
         capture=settings.capture,
+        timezone=settings.timezone,
     )
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
+    app.run_polling(allowed_updates=Update.ALL_TYPES, bootstrap_retries=-1)
 
 
 if __name__ == "__main__":
