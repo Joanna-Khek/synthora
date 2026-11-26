@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/synthora_logo_any.svg" alt="Synthora" width="480">
+<img src="assets/synthora_logo_any.svg" alt="Synthora" width="320">
 
 **Turn the links you save into knowledge that compounds.**
 
