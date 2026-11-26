@@ -110,6 +110,14 @@ sequenceDiagram
     V-->>U: Synced to your devices
 ```
 
+### The capture graph
+
+The LangGraph graph behind steps 3–8, drawn straight from the code with [scripts/draw_graphs.py](scripts/draw_graphs.py). LinkedIn posts take an extra branch to pick and read the resource links inside them. Any error routes to `failed`, which tells you what went wrong.
+
+<p align="center">
+  <img src="assets/capture_graph.png" alt="Capture graph: classify, read, pick_links, read_linked, distill, reply or failed" width="360">
+</p>
+
 ### Reading: one source type, one extractor
 
 The Reader is **rule-based, not an agent**. URL rules decide the Source Type, and each type maps to exactly one MCP tool.
