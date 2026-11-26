@@ -1,0 +1,43 @@
+# One always-on machine in Singapore running the Telegram bot (ADR 0007).
+app = "synthora-bot"  # must be unique across all of Fly
+primary_region = "sin"
+
+[build]
+dockerfile = "Dockerfile"
+
+# Non-secret settings. Secrets go in `fly secrets`, never here.
+[env]
+MLFLOW_SERVER_ENABLE_JOB_EXECUTION = "false"
+TRACING__ENABLED = "true"
+TRACING__EXPERIMENT = "fly-synthora-server"
+TRACING__TRACKING_URI = "http://[::1]:5000"  # MLflow listens on IPv6 only (--host ::)
+
+# The pull API (8.4). Fly terminates HTTPS on synthora-bot.fly.dev and forwards
+# to port 8080. MLflow on 5000 stays private: only this port is exposed.
+[http_service]
+auto_start_machines = false
+auto_stop_machines = "off"  # the bot polls Telegram: it must never be stopped
+force_https = true
+internal_port = 8080
+min_machines_running = 1
+
+[[http_service.checks]]
+grace_period = "30s"
+interval = "30s"
+method = "GET"
+path = "/health"
+timeout = "5s"
+
+# SQLite lives on the volume; everything else is replaced on each deploy.
+[[mounts]]
+destination = "/app/data"
+source = "synthora_data"
+
+# Restart even on exit code 0: your crashed bot exited with 0 earlier.
+[[restart]]
+max_retries = 10
+policy = "always"
+
+[[vm]]
+memory = "2gb"
+size = "shared-cpu-1x"
