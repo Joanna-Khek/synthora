@@ -49,6 +49,23 @@ def _frontmatter(properties: dict) -> str:
     return f"---\n{dumped}---\n"
 
 
+def split_frontmatter(text: str) -> tuple[dict, str]:
+    """'---\\nyaml\\n---\\nbody' → (properties, body). Raises ValueError without frontmatter."""
+    if not text.startswith("---\n"):
+        raise ValueError("this note has no frontmatter")
+    end = text.find("\n---\n", 4)
+    if end == -1:
+        raise ValueError("this note's frontmatter is never closed")
+    props = yaml.safe_load(text[4:end]) or {}
+    if not isinstance(props, dict):
+        raise ValueError("this note's frontmatter isn't a set of properties")
+    return props, text[end + len("\n---\n") :]
+
+
+def join_frontmatter(props: dict, body: str) -> str:
+    return _frontmatter(props) + body
+
+
 def _relation_properties(relations: dict[str, list[str]]) -> dict[str, list[str]]:
     return {rel: [link(n) for n in names] for rel, names in relations.items() if names}
 
@@ -148,3 +165,30 @@ class NodeNote(BaseModel):
             "",
         ]
         return _frontmatter(props) + "\n".join(body)
+
+
+_NOT_ALNUM = re.compile(r"[^0-9a-z]+")
+
+
+def _normalize_word(word: str) -> str:
+    if word.endswith("isation"):  # optimisation -> optimization
+        word = word[: -len("isation")] + "ization"
+    elif len(word) > 5 and word.endswith("our"):  # neighbour -> neighbor
+        word = word[:-3] + "or"
+    if len(word) > 4 and word.endswith("ies"):  # queries -> query
+        return word[:-3] + "y"
+    if len(word) > 3 and word.endswith("s") and not word.endswith(("ss", "us", "is")):
+        return word[:-1]  # embeddings -> embedding, LLMs -> llm
+    return word
+
+
+def name_key(name: str) -> str:
+    """The form two Node names share when they mean the same note (FR-13).
+
+    'Embeddings', 'embedding' and 'Embedding' share a key, as do
+    'Retrieval-Augmented Generation' and 'retrieval augmented generation'.
+    Rules are cheap and deterministic; deciding that two DIFFERENT words mean
+    the same thing ('Vector DB' vs 'Vector Database') is left to the agent.
+    """
+    words = _NOT_ALNUM.split(name.casefold())
+    return " ".join(_normalize_word(w) for w in words if w)
