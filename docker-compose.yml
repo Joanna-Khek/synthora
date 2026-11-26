@@ -1,0 +1,14 @@
+services:
+  bot:
+    build: .
+    image: synthora
+    env_file: .env
+    environment:
+      TRACING__TRACKING_URI: http://host.docker.internal:5000
+    volumes:
+      - synthora-data:/app/data
+    mem_limit: 256m
+    restart: unless-stopped # docker restarts the bot if it crashes
+
+volumes:
+  synthora-data:
