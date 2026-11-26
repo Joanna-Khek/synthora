@@ -22,3 +22,15 @@ node_modules/
 # mlflow
 mlflow.db
 mlruns/
+mlartifacts/
+
+# outputs
+outputs/
+
+# testing scripts
+scripts/
+*.ipynb_checkpoints
+*.ipynb
+
+# docs
+PROJECT_PLAN.md
