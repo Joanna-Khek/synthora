@@ -1,5 +1,6 @@
 """The Reader's side of the Extraction Server: one client, started once, used by every Capture."""
 
+import os
 import asyncio
 import sys
 from typing import TYPE_CHECKING, Any, Self
@@ -8,6 +9,7 @@ from mcp.client import Client
 from mcp.client.stdio import StdioServerParameters
 
 from synthora.domain import ExtractedSource, ExtractionError, SourceType
+
 
 if TYPE_CHECKING:  # only for the type hint: the bot never imports the server code
     from mcp.server.mcpserver import MCPServer
@@ -22,6 +24,9 @@ TOOL_FOR_SOURCE_TYPE = {
 EXTRACTION_SERVER = StdioServerParameters(
     command=sys.executable,  # the same Python (and venv) the bot runs in
     args=["-m", "synthora.extraction.mcp_server"],
+    # The MCP client passes only a few safe variables (PATH, HOME, ...) to a
+    # child by default. Our server is our own code and needs the same secrets.
+    env=dict(os.environ),
 )
 
 
