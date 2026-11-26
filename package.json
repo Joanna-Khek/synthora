@@ -1,5 +1,6 @@
 {
-  "devDependencies": {
-    "defuddle": "^0.19.6"
+  "dependencies": {
+    "defuddle": "0.19.6",
+    "obsidian-headless": "0.0.14"
   }
 }
