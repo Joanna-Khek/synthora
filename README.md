@@ -1,9 +1,6 @@
 <div align="center">
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/synthora_logo.svg">
-  <img src="assets/synthora_logo_light.svg" alt="Synthora" width="480">
-</picture>
+<img src="assets/synthora_logo_any.svg" alt="Synthora" width="480">
 
 **Turn the links you save into knowledge that compounds.**
 
