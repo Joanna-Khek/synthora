@@ -63,7 +63,7 @@ flowchart TB
     user(["📱 Owner on Telegram"])
     web(("🌐 Web, GitHub,<br/>YouTube, LinkedIn"))
 
-    subgraph fly["☁️ Fly.io · 1 machine · 2 GB"]
+    subgraph fly["☁️ Fly.io · 1 machine · 1 GB"]
         bot["Telegram bot<br/><i>owner-only</i>"]
 
         subgraph sg["LangGraph · capture graph"]
@@ -81,7 +81,6 @@ flowchart TB
         content[["Content Server<br/><i>MCP · stdio</i>"]]
         vault[("Vault<br/><i>Markdown files</i>")]
         sync["Obsidian Headless<br/><i>ob sync</i>"]
-        mlflow["MLflow tracing"]
     end
 
     devices(["💻📱 Obsidian on<br/>your devices"])
@@ -92,8 +91,6 @@ flowchart TB
     distiller --> queue --> carto
     carto <-- "MCP tools" --> content <--> vault
     vault <--> sync <-- "Obsidian Sync" --> devices
-    sg -.-> mlflow
-    rg -.-> mlflow
 ```
 
 ### Capture lifecycle
@@ -159,8 +156,8 @@ flowchart LR
 | <img src="https://cdn.simpleicons.org/github/8B949E" width="20"> <img src="https://cdn.simpleicons.org/youtube" width="20"> | Source APIs | GitHub REST · YouTube Data API v3 |
 | <img src="https://cdn.simpleicons.org/sqlite/0F80CC" width="20"> | Queue | SQLite on a Fly volume |
 | <img src="https://cdn.simpleicons.org/obsidian" width="20"> | Knowledge base | Obsidian vault · Obsidian Headless sync |
-| <img src="https://cdn.simpleicons.org/mlflow" width="20"> | Observability | MLflow tracing |
-| <img src="https://cdn.simpleicons.org/flydotio/8B5CF6" width="20"> <img src="https://cdn.simpleicons.org/docker" width="20"> | Hosting | Fly.io (Docker, 1 × shared-cpu, 2 GB) |
+| <img src="https://cdn.simpleicons.org/mlflow" width="20"> | Observability | MLflow tracing (local development) |
+| <img src="https://cdn.simpleicons.org/flydotio/8B5CF6" width="20"> <img src="https://cdn.simpleicons.org/docker" width="20"> | Hosting | Fly.io (Docker, 1 × shared-cpu, 1 GB) |
 | <img src="https://cdn.simpleicons.org/uv" width="20"> | Packaging | uv |
 
 ## Getting started
@@ -191,7 +188,7 @@ uv run pytest -m obsidian  # needs Obsidian running with the test vault
 
 ### Deploying to Fly.io
 
-[start.sh](start.sh) launches MLflow, `ob sync`, the runner loop and the bot inside one container. The vault, the SQLite queue and the `ob` login all live on the Fly volume, so they survive deploys.
+[start.sh](start.sh) launches the pull API, `ob sync`, the runner loop and the bot inside one container. Tracing is off on the server to keep the machine at 1 GB, and MLflow is only used locally. The vault, the SQLite queue and the `ob` login all live on the Fly volume, so they survive deploys.
 
 ```bash
 fly secrets set TELEGRAM_TOKEN=... LLM_API_KEY=...   # secrets never go in fly.toml
@@ -224,7 +221,7 @@ src/synthora/
 | **Strangers using the bot** | The bot only responds to the owner's Telegram user ID |
 | **Overwriting your notes** | Write tools never overwrite, Evidence is append-only, and a guard blocks any change to **My Notes**. A note edited on any device in the last 2 minutes is left alone and retried later |
 | **Undoing a bad write** | Obsidian Sync's version history and Fly's daily volume snapshots |
-| **Exposed internal services** | MLflow stays inside the container. The only public port is the token-protected pull API |
+| **Exposed internal services** | The only public port is the token-protected pull API |
 | **Leaked keys** | Secrets are kept in `.env` / Fly secrets and sent in headers, never in URLs or logs |
 
 ## Documentation

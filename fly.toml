@@ -8,7 +8,7 @@ dockerfile = "Dockerfile"
 # Non-secret settings. Secrets go in `fly secrets`, never here.
 [env]
 MLFLOW_SERVER_ENABLE_JOB_EXECUTION = "false"
-TRACING__ENABLED = "true"
+TRACING__ENABLED = "false"
 TRACING__EXPERIMENT = "fly-synthora-server"
 TRACING__TRACKING_URI = "http://[::1]:5000"  # MLflow listens on IPv6 only (--host ::)
 
@@ -39,5 +39,5 @@ max_retries = 10
 policy = "always"
 
 [[vm]]
-memory = "2gb"
+memory = "1gb"
 size = "shared-cpu-1x"

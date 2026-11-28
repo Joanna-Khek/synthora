@@ -1,12 +1,12 @@
 ---
-status: accepted; amended by 0008 (the machine has 2 GB, not 256 MB, and also runs the Cartographer and Obsidian Headless)
+status: accepted; amended by 0008 (the machine has 1 GB, not 256 MB, and also runs the Cartographer and Obsidian Headless; MLflow no longer runs on it)
 ---
 
 # Host the server on Fly.io: one machine in Singapore
 
-> **Amended by ADR 0008.** The machine now runs the whole pipeline, including the runner, the Content Server, MLflow and `ob sync`, and has **2 GB** of memory (`fly.toml`). The 256 MB size and free-allowance reasoning below is kept as the original decision.
+> **Amended by ADR 0008.** The machine now runs the whole pipeline, including the runner, the Content Server and `ob sync`. It ran with 2 GB while MLflow was on board, and now has **1 GB** (`fly.toml`). The 256 MB size and free-allowance reasoning below is kept as the original decision.
 
-The always-on half of Synthora (ADR 0001), the Telegram bot with its Extraction Server as a child process, runs as one Docker image on **Fly.io**, in the `sin` (Singapore) region, close to the owner (UTC+8). It runs on exactly **one** shared-cpu-1x machine, originally with 256 MB of memory (now 2 GB, ADR 0008), and keeps its SQLite queue on one Fly **volume**. The account is on Fly's Legacy Hobby plan, whose free allowances (up to three shared-cpu-1x 256 MB machines, 3 GB of volume storage, 30 GB of outbound transfer in Asia Pacific) covered the original 256 MB deployment. The 2 GB machine is outside those allowances.
+The always-on half of Synthora (ADR 0001), the Telegram bot with its Extraction Server as a child process, runs as one Docker image on **Fly.io**, in the `sin` (Singapore) region, close to the owner (UTC+8). It runs on exactly **one** shared-cpu-1x machine, originally with 256 MB of memory (now 1 GB, ADR 0008), and keeps its SQLite queue on one Fly **volume**. The account is on Fly's Legacy Hobby plan, whose free allowances (up to three shared-cpu-1x 256 MB machines, 3 GB of volume storage, 30 GB of outbound transfer in Asia Pacific) covered the original 256 MB deployment. The 1 GB machine is outside those allowances.
 
 ## Considered Options
 
@@ -18,6 +18,6 @@ The always-on half of Synthora (ADR 0001), the Telegram bot with its Extraction 
 - **Exactly one machine, never scaled out.** A Fly volume attaches to a single machine and SQLite lives on it, and Telegram allows only one bot to poll. Two machines would split the queue and fight over updates.
 - **Always on while the bot polls.** `auto_stop_machines` must stay off: a polling bot never looks idle. After 8.3 switches the bot to a webhook, Fly could start the machine on demand instead, which would be cheaper; that is decided then.
 - **Secrets are Fly secrets** (`fly secrets set`), injected as environment variables at runtime; they are never in the image or in `fly.toml`.
-- **Memory is the risk.** The bot and the Extraction Server are two Python processes, and Defuddle starts Node.js per LinkedIn post. If they don't fit in 256 MB: add swap (`swap_size_mb`), then reduce memory (e.g. the `mlflow-tracing` package instead of full MLflow), and only then pay for a 512 MB machine. *(Resolved by ADR 0008: with the runner, Content Server, MLflow and `ob sync` added, the machine runs with 2 GB.)*
+- **Memory is the risk.** The bot and the Extraction Server are two Python processes, and Defuddle starts Node.js per LinkedIn post. If they don't fit in 256 MB: add swap (`swap_size_mb`), then reduce memory (e.g. the `mlflow-tracing` package instead of full MLflow), and only then pay for a 512 MB machine. *(Resolved by ADR 0008: with the runner, Content Server and `ob sync` added, the machine runs with 1 GB, after MLflow was removed to cut cost.)*
 - **No Caddy and no server hardening steps**: Fly terminates TLS and manages the host. What stays the owner's job: the app's own security (the owner gate, the pull API's bearer token, NFR-3) and backups of the SQLite file beyond Fly's daily volume snapshots.
 - **The laptop runner can't read the container's database**: once the bot runs on Fly, new Captures reach the laptop only through the pull API (8.4) and an `HttpQueue`. Until then, the local bot stays the one in real use. *(Since ADR 0008, the runner normally runs in the container and reads the local queue. The pull API remains as a fallback for a laptop runner.)*

@@ -1,6 +1,6 @@
 # Synthora — Project Requirements Document
 
-**Status:** Draft v0.6 · **Date:** 2026-11-26 · **Owner:** Joanna Khek Cuina
+**Status:** Draft v0.7 · **Date:** 2026-11-28 · **Owner:** Joanna Khek Cuina
 
 Related: [CONTEXT.md](../CONTEXT.md) (glossary — terms in **bold** below are defined there) · [ADR 0004](adr/0004-rule-based-reader.md) (supersedes [ADR 0002](adr/0002-reader-agent-over-extraction-mcp-server.md)) · [ADR 0007](adr/0007-host-the-server-on-fly-io.md) · [ADR 0008](adr/0008-server-side-vault-with-obsidian-headless.md) (supersedes [ADR 0001](adr/0001-always-on-bot-with-laptop-side-obsidian-cli.md))
 
@@ -115,7 +115,7 @@ See ADR 0004.
 - FR-25. If a Node the Cartographer needs to write is being edited in Obsidian at that moment, the write is deferred and retried later; the Capture stays queued until it succeeds.
 
 ### 4.9 Observability
-- FR-26. Every LangGraph run (capture graph and runner) is traced in MLflow: agent inputs/outputs, tool calls, which extractor the Reader used and why it failed, Content Server tool calls, and Cartographer decisions.
+- FR-26. When tracing is on, every LangGraph run (capture graph and runner) is traced in MLflow: agent inputs/outputs, tool calls, which extractor the Reader used and why it failed, Content Server tool calls, and Cartographer decisions. Tracing is on in local development and off on the server (`TRACING__ENABLED=false`), where MLflow no longer runs to save memory and cost (ADR 0008 amendment); there, failures are diagnosed from `fly logs` and `/status`.
 
 ### 4.10 Content Server
 - FR-27. The **Content Server** is an MCP server (official `mcp` SDK) of shared tools that Synthora's content agents call while crafting knowledge content: the Distiller, the Cartographer, and new agents still to be defined (§9.11). Each agent connects as an MCP client (e.g. via `langchain-mcp-adapters`), so a tool is written once and every agent gets the same behaviour.
@@ -183,7 +183,7 @@ contrasts_with:
 See ADR 0004, ADR 0007 and ADR 0008 for rationale.
 
 ```
-Phone ──Capture──▶ ┌──────── Server (always on: Fly.io, 1 machine, 2 GB) ────────┐
+Phone ──Capture──▶ ┌──────── Server (always on: Fly.io, 1 machine, 1 GB) ────────┐
                    │ Telegram bot (owner-only)                                  │
                    │ LangGraph "capture graph":                                 │
                    │   Source Type (rules) → Reader ─MCP─▶ Extraction Server     │
@@ -212,10 +212,10 @@ Phone ◀──TL;DR──── │   → enqueue result (SQLite; full text ret
 | Content Server | MCP server (official `mcp` SDK) of shared tools for the Cartographer and new content agents; launched by the runner over stdio on the server (ADR 0006, ADR 0008) |
 | Vault access | Plain Markdown files on the Fly volume (`FileVault`, `backend: files`), synced by Obsidian Headless (`obsidian-headless`, pinned in `package.json`). Fallback: the Obsidian CLI (v1.12.7+) from a laptop runner (FR-19) |
 | Obsidian conventions | [obsidian-skills](https://github.com/obsidianmd/obsidian-skills) (`obsidian-markdown`, `obsidian-cli`) vendored under `skills/obsidian/`, pinned to a commit, loaded into the Cartographer's system prompt |
-| Hosting | Fly.io, one shared-cpu-1x machine with 2 GB, `sin` region, one Docker image started by `start.sh` (ADR 0007, ADR 0008) |
+| Hosting | Fly.io, one shared-cpu-1x machine with 1 GB, `sin` region, one Docker image started by `start.sh` (ADR 0007, ADR 0008) |
 | Vault versioning | Obsidian Sync version history and Fly's daily volume snapshots; per-Capture git commits are opt-in and off (FR-20) |
 | Runner | `synthora-runner`, started every 60 s inside the container; reads the local SQLite queue. A laptop runner (native Windows, pull API) remains as a fallback |
-| Tracing | MLflow (LangGraph tracing for both graphs); tracking server in the same container, not exposed (only the pull API port is public) |
+| Tracing | MLflow (LangGraph tracing for both graphs) in local development only. Off on the server, where MLflow no longer runs (ADR 0008 amendment) |
 
 ---
 
@@ -223,9 +223,9 @@ Phone ◀──TL;DR──── │   → enqueue result (SQLite; full text ret
 
 - NFR-1. **Reliability:** no Capture is silently lost. The server must be up continuously (Telegram discards undelivered updates after 24h).
 - NFR-2. **Latency:** TL;DR within ~60s of a Capture for typical articles.
-- NFR-3. **Security:** bot restricted to owner's user ID; laptop↔server pull API authenticated with a secret token over HTTPS; secrets kept out of the repo (including the YouTube API key, which is restricted to the YouTube Data API v3 in Google Cloud). All fetching (inside the Extraction Server) allows only `http`/`https` URLs and refuses private, loopback and link-local addresses (including after redirects), so a URL can't reach internal services such as MLflow. API keys are sent in headers, never in URLs, so they don't leak into error messages, logs or traces.
+- NFR-3. **Security:** bot restricted to owner's user ID; laptop↔server pull API authenticated with a secret token over HTTPS; secrets kept out of the repo (including the YouTube API key, which is restricted to the YouTube Data API v3 in Google Cloud). All fetching (inside the Extraction Server) allows only `http`/`https` URLs and refuses private, loopback and link-local addresses (including after redirects), so a URL can't reach internal services on the machine or its private network. API keys are sent in headers, never in URLs, so they don't leak into error messages, logs or traces.
 - NFR-4. **Safety of the Vault:** every agent write is reversible, through Obsidian Sync's version history (and git, when `vault.git_commits` is on); My Notes never touched.
-- NFR-5. **Cost:** the original hosting target was ≤ $5/mo. The 2 GB Fly machine and Obsidian Sync (ADR 0008) raise it, so the target is to be re-confirmed; LLM spend target to be confirmed (see §9).
+- NFR-5. **Cost:** hosting target ≤ $5/mo (the owner's Fly credit). The 1 GB machine (about $6.70/mo at Fly's US prices, a little more in `sin`) is still slightly over; the ADR 0008 amendment lists the options to get under it. Obsidian Sync is a separate cost. LLM spend target to be confirmed (see §9).
 - NFR-6. **Compliance:** no logged-in scraping or ToS-violating access to LinkedIn.
 
 ---
@@ -246,10 +246,11 @@ Phone ◀──TL;DR──── │   → enqueue result (SQLite; full text ret
 - On the server, `FileVault` reimplements search, aliases and backlinks by reading files → it must resolve links the way Obsidian does (FR-13, FR-14); covered by tests.
 - An edit still being typed on a device and not yet synced is invisible to the busy-note check (FR-25) → Obsidian Sync's conflict handling is the last line of defence.
 - Defuddle is a JavaScript library, so it is called as a subprocess (Node CLI) → adds Node to the server image; pin its version.
-- No fallback extractor: a page that its one extractor mangles or can't read becomes a Failed Capture → watch the Failed Capture rate per Source Type (`/status`, MLflow); add a fallback for a Source Type only if failures are frequent.
+- No fallback extractor: a page that its one extractor mangles or can't read becomes a Failed Capture → watch the Failed Capture rate per Source Type (`/status`, `fly logs`, MLflow when tracing locally); add a fallback for a Source Type only if failures are frequent.
 - Prompt injection: a fetched page may contain text addressed to the Distiller or the Cartographer → mitigated by FR-4c (Source text is data, never instructions) and the SSRF guard in NFR-3.
 - obsidian-skills changes upstream → mitigated by vendoring and pinning a commit; update deliberately.
-- MLflow, the bot, the runner and `ob sync` share one machine → it runs with 2 GB (ADR 0008); watch memory if more processes are added.
+- The bot, the Extraction Server, the runner and `ob sync` share one 1 GB machine (about 720 MB at rest, ADR 0008 amendment) → the peak while the runner or Defuddle runs is still to be measured; watch memory if more processes are added.
+- No production traces: with MLflow off on the server, a bad Cartographer decision in production can only be investigated from logs and the notes it wrote.
 
 ### Success criteria
 - An evaluation set of ~15 real saved links across all Source Types is processed end-to-end, and a manual review of the resulting graph finds no duplicate Concepts and sensible Relations.
@@ -268,8 +269,8 @@ Phone ◀──TL;DR──── │   → enqueue result (SQLite; full text ret
 - Repeat detection → exact URL match only (FR-23).
 - Note being edited while the Cartographer writes → defer and retry later (FR-25).
 - Where the Cartographer runs → on the server, writing vault files that Obsidian Headless syncs (ADR 0008, supersedes ADR 0001). The laptop runner (native Windows) remains as a fallback.
-- Hosting → Fly.io, one 2 GB machine (ADR 0007, ADR 0008).
-- Observability → MLflow (FR-26), tracking server in the same container, not exposed to the network.
+- Hosting → Fly.io, one 1 GB machine (ADR 0007, ADR 0008).
+- Observability → MLflow (FR-26) in local development; off on the server to save cost (ADR 0008 amendment).
 - Hand-edited Synthesis → the Cartographer may overwrite it; prior versions remain in Obsidian Sync's version history. Permanent edits belong in My Notes.
 
 ### Deferred
